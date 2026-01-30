@@ -69,7 +69,7 @@ final class SRTSocket {
         if incomingBuffer.count < windowSizeC {
             incomingBuffer = .init(count: Int(windowSizeC))
         }
-        startRunning()
+        startRunning(name: nil)
     }
 
     func open(_ addr: sockaddr_in, mode: SRTMode, options: [SRTSocketOption: Any] = SRTSocket.defaultOptions) throws {
@@ -111,7 +111,7 @@ final class SRTSocket {
                 throw makeSocketError()
             }
         }
-        startRunning()
+        startRunning(name: nil)
     }
 
     func doOutput(data: Data) {
