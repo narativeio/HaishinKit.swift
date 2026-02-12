@@ -6,7 +6,7 @@ import SwiftPMSupport
 import UIKit
 #endif
 
-public protocol IOMixerDelegate: AnyObject {
+protocol IOMixerDelegate: AnyObject {
     func mixer(_ mixer: IOMixer, didOutput audio: AVAudioPCMBuffer, presentationTimeStamp: CMTime)
     func mixer(_ mixer: IOMixer, didOutput video: CMSampleBuffer)
     #if os(iOS)
@@ -192,7 +192,7 @@ public class IOMixer {
 
     var mediaSync = MediaSync.passthrough
 
-    public weak var delegate: (any IOMixerDelegate)?
+    weak var delegate: (any IOMixerDelegate)?
 
     public lazy var audioIO: IOAudioUnit = {
         var audioIO = IOAudioUnit()
