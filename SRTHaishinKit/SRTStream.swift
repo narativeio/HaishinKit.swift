@@ -65,6 +65,8 @@ public class SRTStream: NetStream {
             }
         }
     }
+    
+    public var onVideoFrameOutput: (() -> Void)?
 
     /// Creates a new SRTStream object.
     public init(_ connection: SRTConnection) {
@@ -83,6 +85,8 @@ public class SRTStream: NetStream {
             }
         }
         keyValueObservations.append(keyValueObservation)
+        
+        mixer.delegate = self
     }
 
     deinit {
@@ -214,5 +218,13 @@ extension SRTStream: TSReaderDelegate {
             return
         }
         mixer.appendSampleBuffer(sampleBuffer)
+    }
+}
+
+extension SRTStream: IOMixerDelegate {
+    public func mixer(_ mixer: IOMixer, didOutput sampleBuffer: CMSampleBuffer) {
+        if CMSampleBufferGetMediaType(sampleBuffer) == kCMMediaType_Video {
+            onVideoFrameOutput?()
+        }
     }
 }

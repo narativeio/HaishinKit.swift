@@ -23,7 +23,12 @@ public class SRTConnection: NSObject {
         guard let socket else {
             return .zero
         }
-        _ = socket.bstats()
+        guard socket.status == SRTS_CONNECTED else {
+            return .zero
+        }
+        if socket.bstats() == -1 {
+            return .zero
+        }
         return SRTPerformanceData(mon: socket.perf)
     }
 
