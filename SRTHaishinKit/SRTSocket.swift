@@ -19,6 +19,7 @@ final class SRTSocket {
     private(set) var mode: SRTMode = .caller
     private(set) var perf: CBytePerfMon = .init()
     private(set) var isRunning: HaishinKit.Atomic<Bool> = HaishinKit.Atomic(false)
+    private let srtQueue = DispatchQueue(label: "com.haishinkit.srt.socket.serial")
     private(set) var socket: SRTSOCKET = SRT_INVALID_SOCK
     private(set) var status: SRT_SOCKSTATUS = SRTS_INIT {
         didSet {
@@ -139,11 +140,13 @@ final class SRTSocket {
     }
 
     func close() {
-        guard socket != SRT_INVALID_SOCK else {
-            return
+        srtQueue.sync {
+            guard socket != SRT_INVALID_SOCK else {
+                return
+            }
+            srt_close(socket)
+            socket = SRT_INVALID_SOCK
         }
-        srt_close(socket)
-        socket = SRT_INVALID_SOCK
     }
 
     func configure(_ binding: SRTSocketOption.Binding) -> Bool {
@@ -156,10 +159,12 @@ final class SRTSocket {
     }
 
     func bstats() -> Int32 {
-        guard socket != SRT_INVALID_SOCK else {
-            return SRT_ERROR
+        return srtQueue.sync {
+            guard socket != SRT_INVALID_SOCK else {
+                return SRT_ERROR
+            }
+            return srt_bstats(socket, &perf, 1)
         }
-        return srt_bstats(socket, &perf, 1)
     }
 
     private func accept() {
@@ -179,21 +184,29 @@ final class SRTSocket {
 
     @inline(__always)
     private func sendmsg2(_ data: inout Data) -> Int32 {
-        return data.withUnsafeBytes { pointer in
-            guard let buffer = pointer.baseAddress?.assumingMemoryBound(to: CChar.self) else {
-                return SRT_ERROR
+        return srtQueue.sync {
+            guard socket != SRT_INVALID_SOCK else { return SRT_ERROR }
+
+            return data.withUnsafeBytes { pointer in
+                guard let buffer = pointer.baseAddress?.assumingMemoryBound(to: CChar.self) else {
+                    return SRT_ERROR
+                }
+                return srt_sendmsg2(socket, buffer, Int32(data.count), nil)
             }
-            return srt_sendmsg2(socket, buffer, Int32(data.count), nil)
         }
     }
 
     @inline(__always)
     private func recvmsg() -> Int32 {
-        return incomingBuffer.withUnsafeMutableBytes { pointer in
-            guard let buffer = pointer.baseAddress?.assumingMemoryBound(to: CChar.self) else {
-                return SRT_ERROR
+        return srtQueue.sync {
+            guard socket != SRT_INVALID_SOCK else { return SRT_ERROR }
+
+            return incomingBuffer.withUnsafeMutableBytes { pointer in
+                guard let buffer = pointer.baseAddress?.assumingMemoryBound(to: CChar.self) else {
+                    return SRT_ERROR
+                }
+                return srt_recvmsg(socket, buffer, windowSizeC)
             }
-            return srt_recvmsg(socket, buffer, windowSizeC)
         }
     }
 }
@@ -207,7 +220,10 @@ extension SRTSocket: Running {
         isRunning.mutate { $0 = true }
         DispatchQueue(label: "com.haishkinkit.SRTHaishinKit.SRTSocket.runloop").async {
             repeat {
-                self.status = srt_getsockstate(self.socket)
+                self.status = self.srtQueue.sync {
+                    srt_getsockstate(self.socket)
+                }
+
                 switch self.mode {
                 case .listener:
                     self.accept()
