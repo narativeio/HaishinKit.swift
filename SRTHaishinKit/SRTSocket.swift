@@ -23,6 +23,8 @@ final class SRTSocket {
     private(set) var isRunning: HaishinKit.Atomic<Bool> = .init(false)
     private(set) var socket: SRTSOCKET = SRT_INVALID_SOCK
 
+    private let isClosing = HaishinKit.Atomic<Bool>(false)
+
     /// ✅ UNIQUE libsrt queue
     private let srtQueue = DispatchQueue(
         label: "com.haishinkit.SRTHaishinKit.SRTSocket.srt",
@@ -140,12 +142,16 @@ final class SRTSocket {
     func doOutput(data: Data) {
         outgoingQueue.async { [weak self] in
             guard let self else { return }
-            guard self.socket != SRT_INVALID_SOCK else { return }
+            guard !self.isClosing.value else { return }
 
+            // ✅ outgoingBuffer TOUJOURS touché uniquement sur outgoingQueue
             self.outgoingBuffer.append(contentsOf: data.chunk(Self.payloadSize))
 
-            while let first = self.outgoingBuffer.first {
-                var chunk = first
+            while !self.outgoingBuffer.isEmpty {
+                if self.isClosing.value { break }
+                if self.socket == SRT_INVALID_SOCK { break }
+
+                var chunk = self.outgoingBuffer[0]
 
                 let sent: Int32 = self.srtQueue.sync {
                     guard self.socket != SRT_INVALID_SOCK else { return SRT_ERROR }
@@ -157,7 +163,10 @@ final class SRTSocket {
                     }
                 }
 
-                if sent == SRT_ERROR { break }
+                if sent == SRT_ERROR {
+                    break
+                }
+
                 self.outgoingBuffer.removeFirst()
             }
         }
@@ -204,6 +213,14 @@ final class SRTSocket {
     // MARK: - Close
 
     func close() {
+        // ✅ empêche tout nouveau send
+        isClosing.mutate { $0 = true }
+
+        // ✅ attend que tous les doOutput en cours finissent
+        outgoingQueue.sync {
+            outgoingBuffer.removeAll()
+        }
+
         stopRunning()
 
         srtQueue.sync {
@@ -211,6 +228,8 @@ final class SRTSocket {
             srt_close(socket)
             socket = SRT_INVALID_SOCK
         }
+
+        isClosing.mutate { $0 = false }
     }
 
     // MARK: - Helpers
