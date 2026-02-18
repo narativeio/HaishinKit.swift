@@ -116,36 +116,63 @@ final class SRTSocket {
     }
 
     func doOutput(data: Data) {
-        outgoingQueue.async {
+        outgoingQueue.async { [weak self] in
+            guard let self else { return }
+            guard self.socket != SRT_INVALID_SOCK else { return }
+
             self.outgoingBuffer.append(contentsOf: data.chunk(SRTSocket.payloadSize))
-            repeat {
-                guard var data = self.outgoingBuffer.first else {
-                    return
+
+            while let first = self.outgoingBuffer.first {
+                var chunk = first
+
+                // ⚠️ libsrt call sérialisé
+                let sent: Int32 = self.srtQueue.sync {
+                    guard self.socket != SRT_INVALID_SOCK else { return SRT_ERROR }
+                    return self.sendmsg2(&chunk)
                 }
-                _ = self.sendmsg2(&data)
-                self.outgoingBuffer.remove(at: 0)
-            } while !self.outgoingBuffer.isEmpty
+
+                // si erreur → on sort (sinon boucle infinie / corruption)
+                if sent == SRT_ERROR {
+                    break
+                }
+
+                self.outgoingBuffer.removeFirst()
+                if self.outgoingBuffer.isEmpty { break }
+            }
         }
     }
 
     func doInput() {
-        incomingQueue.async {
-            repeat {
-                let result = self.recvmsg()
-                if 0 < result {
-                    self.delegate?.socket(self, incomingDataAvailabled: self.incomingBuffer, bytes: result)
+        incomingQueue.async { [weak self] in
+            guard let self else { return }
+
+            while self.isRunning.value {
+                let result: Int32 = self.srtQueue.sync {
+                    guard self.socket != SRT_INVALID_SOCK else { return SRT_ERROR }
+                    return self.recvmsg()
                 }
-            } while self.isRunning.value
+
+                if result > 0 {
+                    self.delegate?.socket(self, incomingDataAvailabled: self.incomingBuffer, bytes: result)
+                } else {
+                    // évite busy loop si socket fermée / erreur
+                    usleep(5 * 1000)
+                }
+            }
         }
     }
 
     func close() {
-        guard socket != SRT_INVALID_SOCK else {
-            return
+        // stop loops d’abord
+        stopRunning()
+
+        srtQueue.sync {
+            guard socket != SRT_INVALID_SOCK else { return }
+            srt_close(socket)
+            socket = SRT_INVALID_SOCK
         }
-        srt_close(socket)
-        socket = SRT_INVALID_SOCK
     }
+
 
     func configure(_ binding: SRTSocketOption.Binding) -> Bool {
         let failures = SRTSocketOption.configure(socket, binding: binding, options: options)
@@ -157,13 +184,12 @@ final class SRTSocket {
     }
 
     func bstats() -> Int32 {
-        return socketQueue.sync {
-            guard socket != SRT_INVALID_SOCK else {
-                return SRT_ERROR
-            }
+        return srtQueue.sync {
+            guard socket != SRT_INVALID_SOCK else { return SRT_ERROR }
             return srt_bstats(socket, &perf, 1)
         }
     }
+
     private func accept() {
         let socket = srt_accept(socket, nil, nil)
         do {
