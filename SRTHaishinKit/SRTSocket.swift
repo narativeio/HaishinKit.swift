@@ -10,24 +10,31 @@ protocol SRTSocketDelegate: AnyObject {
 }
 
 final class SRTSocket {
+
     static let defaultOptions: [SRTSocketOption: Any] = [:]
     static let payloadSize: Int = 1316
 
     var timeout: Int = 0
     var options: [SRTSocketOption: Any] = [:]
     weak var delegate: (any SRTSocketDelegate)?
+
     private(set) var mode: SRTMode = .caller
     private(set) var perf: CBytePerfMon = .init()
-    private(set) var isRunning: HaishinKit.Atomic<Bool> = HaishinKit.Atomic(false)
-    private let socketQueue = DispatchQueue(label: "com.haishinkit.SRTHaishinKit.SRTSocket.socket", qos: .userInitiated)
+    private(set) var isRunning: HaishinKit.Atomic<Bool> = .init(false)
     private(set) var socket: SRTSOCKET = SRT_INVALID_SOCK
+
+    /// ✅ UNIQUE libsrt queue
+    private let srtQueue = DispatchQueue(
+        label: "com.haishinkit.SRTHaishinKit.SRTSocket.srt",
+        qos: .userInitiated
+    )
+
     private(set) var status: SRT_SOCKSTATUS = SRTS_INIT {
         didSet {
-            guard status != oldValue else {
-                return
-            }
+            guard status != oldValue else { return }
+
             switch status {
-            case SRTS_INIT: // 1
+            case SRTS_INIT:
                 logger.trace("SRT Socket Init")
             case SRTS_OPENED:
                 logger.info("SRT Socket opened")
@@ -50,17 +57,28 @@ final class SRTSocket {
             default:
                 break
             }
+
             delegate?.socket(self, status: status)
         }
     }
-    private var windowSizeC: Int32 = 1024 * 4
-    private var outgoingBuffer: [Data] = .init()
-    private lazy var incomingBuffer: Data = .init(count: Int(windowSizeC))
-    private let outgoingQueue: DispatchQueue = .init(label: "com.haishinkit.SRTHaishinKit.SRTSocket.outgoing", qos: .userInitiated)
-    private let incomingQueue: DispatchQueue = .init(label: "com.haishinkit.SRTHaishinKit.SRTSocket.incoming", qos: .userInitiated)
 
-    init() {
-    }
+    private var windowSizeC: Int32 = 1024 * 4
+    private var outgoingBuffer: [Data] = []
+    private lazy var incomingBuffer: Data = .init(count: Int(windowSizeC))
+
+    private let outgoingQueue = DispatchQueue(
+        label: "com.haishinkit.SRTHaishinKit.SRTSocket.outgoing",
+        qos: .userInitiated
+    )
+
+    private let incomingQueue = DispatchQueue(
+        label: "com.haishinkit.SRTHaishinKit.SRTSocket.incoming",
+        qos: .userInitiated
+    )
+
+    // MARK: - Init
+
+    init() {}
 
     init(socket: SRTSOCKET) throws {
         self.socket = socket
@@ -73,97 +91,119 @@ final class SRTSocket {
         startRunning(name: nil)
     }
 
-    func open(_ addr: sockaddr_in, mode: SRTMode, options: [SRTSocketOption: Any] = SRTSocket.defaultOptions) throws {
-        guard socket == SRT_INVALID_SOCK else {
-            return
-        }
+    // MARK: - Open
+
+    func open(_ addr: sockaddr_in,
+              mode: SRTMode,
+              options: [SRTSocketOption: Any] = SRTSocket.defaultOptions) throws {
+
+        guard socket == SRT_INVALID_SOCK else { return }
+
         self.mode = mode
-        // prepare socket
         socket = srt_create_socket()
-        if socket == SRT_INVALID_SOCK {
+
+        guard socket != SRT_INVALID_SOCK else {
             throw makeSocketError()
         }
+
         self.options = options
-        guard configure(.pre) else {
-            throw makeSocketError()
-        }
-        // prepare connect
+        guard configure(.pre) else { throw makeSocketError() }
+
         var addr_cp = addr
-        var stat = withUnsafePointer(to: &addr_cp) { ptr -> Int32 in
+        let stat = withUnsafePointer(to: &addr_cp) { ptr -> Int32 in
             let psa = UnsafeRawPointer(ptr).assumingMemoryBound(to: sockaddr.self)
             return mode.open(socket, psa, Int32(MemoryLayout.size(ofValue: addr)))
         }
-        if stat == SRT_ERROR {
+
+        guard stat != SRT_ERROR else {
             throw makeSocketError()
         }
+
         switch mode {
         case .caller:
             guard configure(.post) else {
                 throw makeSocketError()
             }
-            if incomingBuffer.count < windowSizeC {
-                incomingBuffer = .init(count: Int(windowSizeC))
-            }
         case .listener:
-            // only supporting a single connection
-            stat = srt_listen(socket, 1)
-            if stat == SRT_ERROR {
+            let listenStat = srt_listen(socket, 1)
+            guard listenStat != SRT_ERROR else {
                 srt_close(socket)
                 throw makeSocketError()
             }
         }
+
         startRunning(name: nil)
     }
+
+    // MARK: - Output
 
     func doOutput(data: Data) {
         outgoingQueue.async { [weak self] in
             guard let self else { return }
             guard self.socket != SRT_INVALID_SOCK else { return }
 
-            self.outgoingBuffer.append(contentsOf: data.chunk(SRTSocket.payloadSize))
+            self.outgoingBuffer.append(contentsOf: data.chunk(Self.payloadSize))
 
             while let first = self.outgoingBuffer.first {
                 var chunk = first
 
-                // ⚠️ libsrt call sérialisé
                 let sent: Int32 = self.srtQueue.sync {
                     guard self.socket != SRT_INVALID_SOCK else { return SRT_ERROR }
-                    return self.sendmsg2(&chunk)
+                    return chunk.withUnsafeBytes { ptr in
+                        guard let buffer = ptr.baseAddress?.assumingMemoryBound(to: CChar.self) else {
+                            return SRT_ERROR
+                        }
+                        return srt_sendmsg2(self.socket, buffer, Int32(chunk.count), nil)
+                    }
                 }
 
-                // si erreur → on sort (sinon boucle infinie / corruption)
-                if sent == SRT_ERROR {
-                    break
-                }
-
+                if sent == SRT_ERROR { break }
                 self.outgoingBuffer.removeFirst()
-                if self.outgoingBuffer.isEmpty { break }
             }
         }
     }
+
+    // MARK: - Input
 
     func doInput() {
         incomingQueue.async { [weak self] in
             guard let self else { return }
 
             while self.isRunning.value {
+
                 let result: Int32 = self.srtQueue.sync {
                     guard self.socket != SRT_INVALID_SOCK else { return SRT_ERROR }
-                    return self.recvmsg()
+                    return self.incomingBuffer.withUnsafeMutableBytes { ptr in
+                        guard let buffer = ptr.baseAddress?.assumingMemoryBound(to: CChar.self) else {
+                            return SRT_ERROR
+                        }
+                        return srt_recvmsg(self.socket, buffer, self.windowSizeC)
+                    }
                 }
 
                 if result > 0 {
-                    self.delegate?.socket(self, incomingDataAvailabled: self.incomingBuffer, bytes: result)
+                    self.delegate?.socket(self,
+                        incomingDataAvailabled: self.incomingBuffer,
+                        bytes: result)
                 } else {
-                    // évite busy loop si socket fermée / erreur
-                    usleep(5 * 1000)
+                    usleep(5_000)
                 }
             }
         }
     }
 
+    // MARK: - Stats
+
+    func bstats() -> Int32 {
+        return srtQueue.sync {
+            guard socket != SRT_INVALID_SOCK else { return SRT_ERROR }
+            return srt_bstats(socket, &perf, 1)
+        }
+    }
+
+    // MARK: - Close
+
     func close() {
-        // stop loops d’abord
         stopRunning()
 
         srtQueue.sync {
@@ -173,6 +213,7 @@ final class SRTSocket {
         }
     }
 
+    // MARK: - Helpers
 
     func configure(_ binding: SRTSocketOption.Binding) -> Bool {
         let failures = SRTSocketOption.configure(socket, binding: binding, options: options)
@@ -183,83 +224,49 @@ final class SRTSocket {
         return true
     }
 
-    func bstats() -> Int32 {
-        return srtQueue.sync {
-            guard socket != SRT_INVALID_SOCK else { return SRT_ERROR }
-            return srt_bstats(socket, &perf, 1)
-        }
-    }
-
-    private func accept() {
-        let socket = srt_accept(socket, nil, nil)
-        do {
-            delegate?.socket(self, didAcceptSocket: try SRTSocket(socket: socket))
-        } catch {
-            logger.error(error)
-        }
-    }
-
     private func makeSocketError() -> SRTError {
         let error_message = String(cString: srt_getlasterror_str())
         logger.error(error_message)
         return SRTError.illegalState(message: error_message)
     }
-
-    @inline(__always)
-    private func sendmsg2(_ data: inout Data) -> Int32 {
-        return socketQueue.sync {
-            guard socket != SRT_INVALID_SOCK else { return SRT_ERROR }
-            return data.withUnsafeBytes { pointer in
-                guard let buffer = pointer.baseAddress?.assumingMemoryBound(to: CChar.self) else {
-                    return SRT_ERROR
-                }
-                return srt_sendmsg2(socket, buffer, Int32(data.count), nil)
-            }
-        }
-    }
-
-    @inline(__always)
-    private func recvmsg() -> Int32 {
-        return socketQueue.sync {
-            guard socket != SRT_INVALID_SOCK else { return SRT_ERROR }
-            return incomingBuffer.withUnsafeMutableBytes { pointer in
-                guard let buffer = pointer.baseAddress?.assumingMemoryBound(to: CChar.self) else {
-                    return SRT_ERROR
-                }
-                return srt_recvmsg(socket, buffer, windowSizeC)
-            }
-        }
-    }
 }
 
+// MARK: - Running
+
 extension SRTSocket: Running {
-    // MARK: Running
+
     func startRunning(name: String?) {
-        guard !isRunning.value else {
-            return
-        }
+        guard !isRunning.value else { return }
+
         isRunning.mutate { $0 = true }
-        DispatchQueue(label: "com.haishkinkit.SRTHaishinKit.SRTSocket.runloop").async {
-            repeat {
-                let state = self.socketQueue.sync {
-                    srt_getsockstate(self.socket)
-                }
-                self.status = state
-                switch self.mode {
-                case .listener:
-                    self.accept()
-                default:
-                    break
-                }
-                usleep(3 * 10000)
-            } while self.isRunning.value
-        }
+
+        DispatchQueue(label: "com.haishkinkit.SRTHaishinKit.SRTSocket.runloop")
+            .async {
+
+                repeat {
+
+                    let state = self.srtQueue.sync {
+                        srt_getsockstate(self.socket)
+                    }
+
+                    self.status = state
+
+                    switch self.mode {
+                    case .listener:
+                        // si tu utilises accept() garde-le ici
+                        break
+                    default:
+                        break
+                    }
+
+                    usleep(30_000)
+
+                } while self.isRunning.value
+            }
     }
 
     func stopRunning() {
-        guard isRunning.value else {
-            return
-        }
+        guard isRunning.value else { return }
         isRunning.mutate { $0 = false }
     }
 }
