@@ -191,9 +191,11 @@ final class SRTSocket {
                 }
 
                 if result > 0 {
+                    let packet = Data(self.incomingBuffer.prefix(Int(result)))
                     self.delegate?.socket(self,
-                        incomingDataAvailabled: self.incomingBuffer,
+                        incomingDataAvailabled: packet,
                         bytes: result)
+
                 } else {
                     usleep(5_000)
                 }
