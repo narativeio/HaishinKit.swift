@@ -20,16 +20,29 @@ public class SRTConnection: NSObject {
 
     /// The SRT's performance data.
     public var performanceData: SRTPerformanceData {
-        guard let socket else {
+
+        // Snapshot local sécurisé
+        guard let socket = socket else {
             return .zero
         }
+
+        // Vérification connexion
         guard socket.status == SRTS_CONNECTED else {
             return .zero
         }
-        if socket.bstats() == -1 {
+
+        // Appel libsrt sérialisé (grâce au patch précédent)
+        let result = socket.bstats()
+
+        // Si erreur libsrt → retour safe
+        guard result != SRT_ERROR else {
             return .zero
         }
-        return SRTPerformanceData(mon: socket.perf)
+
+        // Snapshot copy IMMÉDIATE de la struct C
+        let snapshot = socket.perf
+
+        return SRTPerformanceData(mon: snapshot)
     }
 
     /// Creates a new SRTConnection.
