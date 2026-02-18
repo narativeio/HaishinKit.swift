@@ -4,16 +4,23 @@ import HaishinKit
 import libsrt
 
 /// An object that provides the interface to control a one-way channel over a SRTConnection.
-public final class SRTStream: IOStream {
+public final class SRTStream: NetStream {
     private var name: String?
     private var action: (() -> Void)?
     private var keyValueObservations: [NSKeyValueObservation] = []
     private weak var connection: SRTConnection?
-    private lazy var muxer: SRTMuxer = {
-        SRTMuxer(self)
+    private lazy var writer = {
+        var writer = TSWriter()
+        writer.delegate = self
+        return writer
+    }()
+    private lazy var reader = {
+        var reader = TSReader()
+        reader.delegate = self
+        return reader
     }()
 
-    /// Creates a new stream object.
+    /// Creates a new SRTStream object.
     public init(connection: SRTConnection) {
         super.init()
         self.connection = connection
@@ -87,31 +94,47 @@ public final class SRTStream: IOStream {
         }
     }
 
-    override public func readyStateDidChange(to readyState: IOStream.ReadyState) {
+    override public func readyStateDidChange(to readyState: NetStream.ReadyState) {
         super.readyStateDidChange(to: readyState)
         switch readyState {
         case .play:
             connection?.socket?.doInput()
             self.readyState = .playing
         case .publish:
-            muxer.expectedMedias.removeAll()
-            if !videoInputFormats.isEmpty {
-                muxer.expectedMedias.insert(.video)
+            writer.expectedMedias.removeAll()
+            if videoInputFormat != nil {
+                writer.expectedMedias.insert(.video)
             }
-            if !audioInputFormats.isEmpty {
-                muxer.expectedMedias.insert(.audio)
+            if audioInputFormat != nil {
+                writer.expectedMedias.insert(.audio)
             }
-            self.readyState = .publishing(muxer: muxer)
+            self.readyState = .publishing(muxer: writer)
         default:
             break
         }
     }
 
     func doInput(_ data: Data) {
-        muxer.read(data)
+        _ = reader.read(data)
+    }
+}
+
+extension SRTStream: TSWriterDelegate {
+    // MARK: TSWriterDelegate
+    public func writer(_ writer: TSWriter, didOutput data: Data) {
+        connection?.socket?.doOutput(data: data)
     }
 
-    func doOutput(_ data: Data) {
-        connection?.socket?.doOutput(data: data)
+    public func writer(_ writer: TSWriter, didRotateFileHandle timestamp: CMTime) {
+    }
+}
+
+extension SRTStream: TSReaderDelegate {
+    // MARK: TSReaderDelegate
+    public func reader(_ reader: TSReader, id: UInt16, didRead formatDescription: CMFormatDescription) {
+    }
+
+    public func reader(_ reader: TSReader, id: UInt16, didRead sampleBuffer: CMSampleBuffer) {
+        append(sampleBuffer)
     }
 }
