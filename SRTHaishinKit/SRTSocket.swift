@@ -18,7 +18,7 @@ final class SRTSocket<T: SRTSocketDelegate> {
     weak var delegate: T?
     private(set) var mode: SRTMode = .caller
     private(set) var perf: CBytePerfMon = .init()
-    private(set) var isRunning: Atomic<Bool> = .init(false)
+    private(set) var isRunning: HaishinKit.Atomic<Bool> = HaishinKit.Atomic(false)
     private(set) var socket: SRTSOCKET = SRT_INVALID_SOCK
     private(set) var status: SRT_SOCKSTATUS = SRTS_INIT {
         didSet {
@@ -200,7 +200,7 @@ final class SRTSocket<T: SRTSocketDelegate> {
 
 extension SRTSocket: Running {
     // MARK: Running
-    func startRunning() {
+    func startRunning(name: String?) {
         guard !isRunning.value else {
             return
         }

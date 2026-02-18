@@ -3,6 +3,15 @@ import VideoToolbox
 
 /// The VideoCodecSettings class  specifying video compression settings.
 public struct VideoCodecSettings: Codable {
+    /// The number of frame rate for 30fps.
+    public static let frameInterval30 = (1 / 30) - 0.001
+    /// The number of frame rate for 10fps.
+    public static let frameInterval10 = (1 / 10) - 0.001
+    /// The number of frame rate for 5fps.
+    public static let frameInterval05 = (1 / 05) - 0.001
+    /// The number of frame rate for 1fps.
+    public static let frameInterval01 = (1 / 01) - 0.001
+
     /// The defulat value.
     public static let `default` = VideoCodecSettings()
 
@@ -76,15 +85,7 @@ public struct VideoCodecSettings: Codable {
     /// Specifies the video size of encoding video.
     public var videoSize: CGSize
     /// Specifies the bitrate.
-    public var bitRate: UInt32
-    /// Specifies the keyframeInterval.
-    public var maxKeyFrameIntervalDuration: Int32
-    /// Specifies the scalingMode.
-    public var scalingMode: ScalingMode
-    /// Specifies the allowFrameRecording.
-    public var allowFrameReordering: Bool? // swiftlint:disable:this discouraged_optional_boolean
-    /// Specifies the bitRateMode.
-    public var bitRateMode: BitRateMode
+    public var bitRate: Int
     /// Specifies the H264 profileLevel.
     public var profileLevel: String {
         didSet {
@@ -95,29 +96,43 @@ public struct VideoCodecSettings: Codable {
             }
         }
     }
+    /// Specifies the scalingMode.
+    public var scalingMode: ScalingMode
+    /// Specifies the bitRateMode.
+    public var bitRateMode: BitRateMode
+    /// Specifies the keyframeInterval.
+    public var maxKeyFrameIntervalDuration: Int32
+    /// Specifies the allowFrameRecording.
+    public var allowFrameReordering: Bool? // swiftlint:disable:this discouraged_optional_boolean
+    /// Specifies the dataRateLimits
+    public var dataRateLimits: [Double]?
     /// Specifies the HardwareEncoder is enabled(TRUE), or not(FALSE) for macOS.
-    public var isHardwareEncoderEnabled = true
+    public var isHardwareEncoderEnabled: Bool
+    /// Specifies the video frame interval.
+    public var frameInterval: Double = 0.0
 
     var format: Format = .h264
 
     /// Creates a new VideoCodecSettings instance.
     public init(
         videoSize: CGSize = .init(width: 854, height: 480),
+        bitRate: Int = 640 * 1000,
         profileLevel: String = kVTProfileLevel_H264_Baseline_3_1 as String,
-        bitRate: UInt32 = 640 * 1000,
-        maxKeyFrameIntervalDuration: Int32 = 2,
         scalingMode: ScalingMode = .trim,
         bitRateMode: BitRateMode = .average,
-        allowFrameReordering: Bool? = nil, // swiftlint:disable:this discouraged_optional_boolean
+        maxKeyFrameIntervalDuration: Int32 = 2,
+        allowFrameReordering: Bool? = nil, // swiftlint:disable:this discouraged_optional_boolean,
+        dataRateLimits: [Double]? = [0.0, 0.0],
         isHardwareEncoderEnabled: Bool = true
     ) {
         self.videoSize = videoSize
-        self.profileLevel = profileLevel
         self.bitRate = bitRate
-        self.maxKeyFrameIntervalDuration = maxKeyFrameIntervalDuration
+        self.profileLevel = profileLevel
         self.scalingMode = scalingMode
         self.bitRateMode = bitRateMode
+        self.maxKeyFrameIntervalDuration = maxKeyFrameIntervalDuration
         self.allowFrameReordering = allowFrameReordering
+        self.dataRateLimits = dataRateLimits
         self.isHardwareEncoderEnabled = isHardwareEncoderEnabled
         if profileLevel.contains("HEVC") {
             self.format = .hevc
@@ -131,20 +146,26 @@ public struct VideoCodecSettings: Codable {
                     allowFrameReordering == rhs.allowFrameReordering &&
                     bitRateMode == rhs.bitRateMode &&
                     profileLevel == rhs.profileLevel &&
+                    dataRateLimits == rhs.dataRateLimits &&
                     isHardwareEncoderEnabled == rhs.isHardwareEncoderEnabled
         )
     }
 
-    func apply(_ codec: VideoCodec, rhs: VideoCodecSettings) {
+    func apply<T>(_ codec: VideoCodec<T>, rhs: VideoCodecSettings) {
         if bitRate != rhs.bitRate {
+            logger.info("bitRate change from ", rhs.bitRate, " to ", bitRate)
             let option = VTSessionOption(key: bitRateMode.key, value: NSNumber(value: bitRate))
             if let status = codec.session?.setOption(option), status != noErr {
                 codec.delegate?.videoCodec(codec, errorOccurred: .failedToSetOption(status: status, option: option))
             }
         }
+        if frameInterval != rhs.frameInterval {
+            codec.frameInterval = frameInterval
+        }
     }
 
-    func options(_ codec: VideoCodec) -> Set<VTSessionOption> {
+    // https://developer.apple.com/documentation/videotoolbox/encoding_video_for_live_streaming
+    func options<T>(_ codec: VideoCodec<T>) -> Set<VTSessionOption> {
         let isBaseline = profileLevel.contains("Baseline")
         var options = Set<VTSessionOption>([
             .init(key: .realTime, value: kCFBooleanTrue),
@@ -158,6 +179,14 @@ public struct VideoCodecSettings: Codable {
                 "ScalingMode": scalingMode.rawValue
             ] as NSObject)
         ])
+        if bitRateMode == .average {
+            if let dataRateLimits, dataRateLimits.count == 2 {
+                var limits = [Double](repeating: 0.0, count: 2)
+                limits[0] = dataRateLimits[0] == 0 ? Double(bitRate) / 8 * 1.5 : dataRateLimits[0]
+                limits[1] = dataRateLimits[1] == 0 ? Double(1.0) : dataRateLimits[1]
+                options.insert(.init(key: .dataRateLimits, value: limits as NSArray))
+            }
+        }
         #if os(macOS)
         if isHardwareEncoderEnabled {
             options.insert(.init(key: .encoderID, value: format.encoderID))
@@ -165,7 +194,7 @@ public struct VideoCodecSettings: Codable {
             options.insert(.init(key: .requireHardwareAcceleratedVideoEncoder, value: kCFBooleanTrue))
         }
         #endif
-        if !isBaseline {
+        if !isBaseline && profileLevel.contains("H264") {
             options.insert(.init(key: .H264EntropyMode, value: kVTH264EntropyMode_CABAC))
         }
         return options

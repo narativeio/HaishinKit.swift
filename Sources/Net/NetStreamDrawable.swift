@@ -3,13 +3,18 @@ import Foundation
 
 /// An interface that manages the NetStream content on the screen.
 public protocol NetStreamDrawable: AnyObject {
-    #if !os(tvOS)
+    #if os(iOS) || os(macOS)
     /// Specifies the orientation of AVCaptureVideoOrientation.
     var videoOrientation: AVCaptureVideoOrientation { get set }
     #endif
 
-    /// The videoFormatDescription which is the current CMSampleBuffer.
-    var videoFormatDescription: CMVideoFormatDescription? { get }
+    #if os(iOS) || os(tvOS) || os(macOS)
+    /// Specifies the capture video preview enabled or not.
+    ///
+    /// Use AVCaptureVideoPreviewLayer as an internal implementation. You can verify that there is no delay in cinema mode. However, you cannot confirm the filter state.
+    @available(tvOS 17.0, *)
+    var isCaptureVideoPreviewEnabled: Bool { get set }
+    #endif
 
     /// Attaches a drawable to a new NetStream object.
     func attachStream(_ stream: NetStream?)

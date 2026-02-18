@@ -14,7 +14,7 @@ public protocol EventDispatcherConvertible: AnyObject {
 
 // MARK: -
 /// The Event interface is used to provide information.
-open class Event {
+public final class Event {
     /// A structure that defines the name of an event.
     public struct Name: RawRepresentable, ExpressibleByStringLiteral {
         // swiftlint:disable:next nesting
@@ -22,17 +22,23 @@ open class Event {
         // swiftlint:disable:next nesting
         public typealias StringLiteralType = String
 
+        /// A type name for Sync event.
         public static let sync: Name = "sync"
+        /// A type name for Event.
         public static let event: Name = "event"
+        /// A type name for IO_Error event.
         public static let ioError: Name = "ioError"
+        /// A type name for RTMPStatus event.
         public static let rtmpStatus: Name = "rtmpStatus"
 
         public let rawValue: String
 
+        /// Create a Event.Name by rawValue.
         public init(rawValue: String) {
             self.rawValue = rawValue
         }
 
+        /// Create a Event.Name by stringLiteral.
         public init(stringLiteral value: String) {
             self.rawValue = value
         }
@@ -78,7 +84,7 @@ extension Event: CustomDebugStringConvertible {
 /**
  * The EventDispatcher interface is in implementation which supports the DOM Event Model.
  */
-open class EventDispatcher: EventDispatcherConvertible {
+public class EventDispatcher: EventDispatcherConvertible {
     private weak var target: AnyObject?
 
     /// Creates a new event dispatcher.
