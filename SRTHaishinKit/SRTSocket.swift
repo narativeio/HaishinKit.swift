@@ -23,7 +23,7 @@ final class SRTSocket {
     private(set) var isRunning: HaishinKit.Atomic<Bool> = .init(false)
     private(set) var socket: SRTSOCKET = SRT_INVALID_SOCK
 
-    private let isClosing = HaishinKit.Atomic<Bool>(false)
+    private var isClosing = HaishinKit.Atomic<Bool>(false)
 
     /// ✅ UNIQUE libsrt queue
     private let srtQueue = DispatchQueue(
