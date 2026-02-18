@@ -3,22 +3,21 @@ import HaishinKit
 import libsrt
 import Logboard
 
+private let kSRTSOcket_payloadSize: Int = 1316
+
 protocol SRTSocketDelegate: AnyObject {
-    func socket(_ socket: SRTSocket, status: SRT_SOCKSTATUS)
-    func socket(_ socket: SRTSocket, incomingDataAvailabled data: Data, bytes: Int32)
-    func socket(_ socket: SRTSocket, didAcceptSocket client: SRTSocket)
+    func socket(_ socket: SRTSocket<Self>, status: SRT_SOCKSTATUS)
+    func socket(_ socket: SRTSocket<Self>, incomingDataAvailabled data: Data, bytes: Int32)
+    func socket(_ socket: SRTSocket<Self>, didAcceptSocket client: SRTSocket<Self>)
 }
 
-final class SRTSocket {
-    static let defaultOptions: [SRTSocketOption: Any] = [:]
-    static let payloadSize: Int = 1316
-
+final class SRTSocket<T: SRTSocketDelegate> {
     var timeout: Int = 0
     var options: [SRTSocketOption: Any] = [:]
-    weak var delegate: (any SRTSocketDelegate)?
+    weak var delegate: T?
     private(set) var mode: SRTMode = .caller
     private(set) var perf: CBytePerfMon = .init()
-    private(set) var isRunning: HaishinKit.Atomic<Bool> = HaishinKit.Atomic(false)
+    private(set) var isRunning: Atomic<Bool> = .init(false)
     private(set) var socket: SRTSOCKET = SRT_INVALID_SOCK
     private(set) var status: SRT_SOCKSTATUS = SRTS_INIT {
         didSet {
@@ -69,10 +68,9 @@ final class SRTSocket {
         if incomingBuffer.count < windowSizeC {
             incomingBuffer = .init(count: Int(windowSizeC))
         }
-        startRunning(name: nil)
     }
 
-    func open(_ addr: sockaddr_in, mode: SRTMode, options: [SRTSocketOption: Any] = SRTSocket.defaultOptions) throws {
+    func open(_ addr: sockaddr_in, mode: SRTMode, options: [SRTSocketOption: Any] = [:]) throws {
         guard socket == SRT_INVALID_SOCK else {
             return
         }
@@ -111,12 +109,21 @@ final class SRTSocket {
                 throw makeSocketError()
             }
         }
-        startRunning(name: nil)
+        startRunning()
+    }
+
+    func close() {
+        guard socket != SRT_INVALID_SOCK else {
+            return
+        }
+        srt_close(socket)
+        socket = SRT_INVALID_SOCK
+        stopRunning()
     }
 
     func doOutput(data: Data) {
         outgoingQueue.async {
-            self.outgoingBuffer.append(contentsOf: data.chunk(SRTSocket.payloadSize))
+            self.outgoingBuffer.append(contentsOf: data.chunk(kSRTSOcket_payloadSize))
             repeat {
                 guard var data = self.outgoingBuffer.first else {
                     return
@@ -128,22 +135,19 @@ final class SRTSocket {
     }
 
     func doInput() {
-        incomingQueue.async {
-            repeat {
-                let result = self.recvmsg()
-                if 0 < result {
-                    self.delegate?.socket(self, incomingDataAvailabled: self.incomingBuffer, bytes: result)
-                }
-            } while self.isRunning.value
+        switch mode {
+        case .caller:
+            incomingQueue.async {
+                repeat {
+                    let result = self.recvmsg()
+                    if 0 < result {
+                        self.delegate?.socket(self, incomingDataAvailabled: self.incomingBuffer, bytes: result)
+                    }
+                } while self.isRunning.value
+            }
+        case .listener:
+            break
         }
-    }
-
-    func close() {
-        guard socket != SRT_INVALID_SOCK else {
-            return
-        }
-        srt_close(socket)
-        socket = SRT_INVALID_SOCK
     }
 
     func configure(_ binding: SRTSocketOption.Binding) -> Bool {
@@ -160,6 +164,11 @@ final class SRTSocket {
             return SRT_ERROR
         }
         return srt_bstats(socket, &perf, 1)
+    }
+
+    func reject() {
+        srt_setrejectreason(socket, Int32(SRT_REJ_CLOSE.rawValue))
+        srt_close(socket)
     }
 
     private func accept() {
@@ -200,7 +209,7 @@ final class SRTSocket {
 
 extension SRTSocket: Running {
     // MARK: Running
-    func startRunning(name: String?) {
+    func startRunning() {
         guard !isRunning.value else {
             return
         }
