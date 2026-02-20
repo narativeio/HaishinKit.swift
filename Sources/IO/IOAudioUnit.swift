@@ -131,30 +131,30 @@ extension IOAudioUnit: AVCaptureAudioDataOutputSampleBufferDelegate {
 }
 #endif
 
-public extension IOAudioUnit: Running {
+extension IOAudioUnit: Running {
     // MARK: Running
-    func startRunning(name: String? = nil) {
+    public func startRunning(name: String? = nil) {
         codec.startRunning()
     }
 
-    func stopRunning() {
+    public func stopRunning() {
         codec.stopRunning()
     }
 }
 
 extension IOAudioUnit: IOAudioResamplerDelegate {
     // MARK: IOAudioResamplerDelegate
-    public func resampler(_ resampler: IOAudioResampler<IOAudioUnit>, errorOccurred error: IOAudioUnitError) {
+    func resampler(_ resampler: IOAudioResampler<IOAudioUnit>, errorOccurred error: IOAudioUnitError) {
         mixer?.audioUnit(self, errorOccurred: error)
     }
 
-    public func resampler(_ resampler: IOAudioResampler<IOAudioUnit>, didOutput audioFormat: AVAudioFormat) {
+    func resampler(_ resampler: IOAudioResampler<IOAudioUnit>, didOutput audioFormat: AVAudioFormat) {
         inputFormat = resampler.inputFormat
         codec.inputFormat = audioFormat
         monitor.inputFormat = audioFormat
     }
 
-    public func resampler(_ resampler: IOAudioResampler<IOAudioUnit>, didOutput audioBuffer: AVAudioPCMBuffer, when: AVAudioTime) {
+    func resampler(_ resampler: IOAudioResampler<IOAudioUnit>, didOutput audioBuffer: AVAudioPCMBuffer, when: AVAudioTime) {
         mixer?.audioUnit(self, didOutput: audioBuffer, when: when)
         monitor.append(audioBuffer, when: when)
         codec.append(audioBuffer, when: when)
