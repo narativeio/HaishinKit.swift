@@ -39,7 +39,7 @@ public final class IOAudioUnit: NSObject, IOUnit {
             resampler.settings = settings.makeAudioResamplerSettings()
         }
     }
-    var isRunning: Atomic<Bool> {
+    public var isRunning: Atomic<Bool> {
         return codec.isRunning
     }
     private(set) var inputFormat: FormatDescription?
