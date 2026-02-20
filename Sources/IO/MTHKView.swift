@@ -44,6 +44,8 @@ public class MTHKView: MTKView {
             }
         }
     }
+    
+    public var isMirrored: Bool = false
 
     private var currentSampleBuffer: CMSampleBuffer?
 
@@ -178,6 +180,10 @@ extension MTHKView: MTKViewDelegate {
         }
         let bounds = CGRect(origin: .zero, size: drawableSize)
         var scaledImage: CIImage = displayImage
+
+        if isMirrored {
+            scaledImage = scaledImage.oriented(.upMirrored)
+        }
 
         scaledImage = scaledImage
             .transformed(by: CGAffineTransform(translationX: translationX, y: translationY))
