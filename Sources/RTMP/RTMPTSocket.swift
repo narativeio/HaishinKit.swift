@@ -26,7 +26,6 @@ final class RTMPTSocket: NSObject, RTMPSocketCompatible {
                 delegate?.dispatch(event: event)
             }
             events.removeAll()
-            session.finishTasksAndInvalidate()
         }
     }
 
@@ -113,7 +112,6 @@ final class RTMPTSocket: NSObject, RTMPSocketCompatible {
             let data: ASObject = (readyState == .handshakeDone) ?
                 RTMPConnection.Code.connectClosed.data("") : RTMPConnection.Code.connectFailed.data("")
             events.append(Event(type: .rtmpStatus, bubbles: false, data: data))
-            session.finishTasksAndInvalidate()
         }
         guard let connectionID: String = connectionID else {
             return

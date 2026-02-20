@@ -5,7 +5,7 @@ enum VTSessionMode {
     case compression
     case decompression
 
-    func makeSession(_ videoCodec: VideoCodec) -> (any VTSessionConvertible)? {
+    func makeSession<T>(_ videoCodec: VideoCodec<T>) -> (any VTSessionConvertible)? {
         switch self {
         case .compression:
             var session: VTCompressionSession?
@@ -15,7 +15,7 @@ enum VTSessionMode {
                 height: Int32(videoCodec.settings.videoSize.height),
                 codecType: videoCodec.settings.format.codecType,
                 encoderSpecification: nil,
-                imageBufferAttributes: videoCodec.attributes as CFDictionary?,
+                imageBufferAttributes: videoCodec.imageBufferAttributes(.compression) as CFDictionary?,
                 compressedDataAllocator: nil,
                 outputCallback: nil,
                 refcon: nil,
@@ -35,21 +35,19 @@ enum VTSessionMode {
                 videoCodec.delegate?.videoCodec(videoCodec, errorOccurred: .failedToPrepare(status: status))
                 return nil
             }
+            videoCodec.frameInterval = videoCodec.settings.frameInterval
             return session
         case .decompression:
-            guard let formatDescription = videoCodec.formatDescription else {
+            guard let formatDescription = videoCodec.inputFormat else {
                 videoCodec.delegate?.videoCodec(videoCodec, errorOccurred: .failedToCreate(status: kVTParameterErr))
                 return nil
             }
-            var attributes = videoCodec.attributes
-            attributes?.removeValue(forKey: kCVPixelBufferWidthKey)
-            attributes?.removeValue(forKey: kCVPixelBufferHeightKey)
             var session: VTDecompressionSession?
             let status = VTDecompressionSessionCreate(
                 allocator: kCFAllocatorDefault,
                 formatDescription: formatDescription,
                 decoderSpecification: nil,
-                imageBufferAttributes: attributes as CFDictionary?,
+                imageBufferAttributes: videoCodec.imageBufferAttributes(.decompression) as CFDictionary?,
                 outputCallback: nil,
                 decompressionSessionOut: &session
             )

@@ -97,7 +97,7 @@ extension NetService: NetClientDelegate {
 
 extension NetService: Running {
     // MARK: Runnbale
-    public func startRunning(name: String? = nil) {
+    public func startRunning() {
         lockQueue.async {
             if self.isRunning.value {
                 return

@@ -3,6 +3,8 @@ import Foundation
 
 /// The RTMPResponder class provides to use handle RTMPConnection's callback.
 open class RTMPResponder {
+    static let empty = RTMPResponder(result: { _ in })
+
     /// A Handler represents RTMPResponder's callback function.
     public typealias Handler = (_ data: [Any?]) -> Void
 
@@ -37,7 +39,7 @@ public protocol RTMPConnectionDelegate: AnyObject {
 
 // MARK: -
 /// The RTMPConneciton class create a two-way RTMP connection.
-open class RTMPConnection: EventDispatcher {
+public class RTMPConnection: EventDispatcher {
     /// The default network's window size for RTMPConnection.
     public static let defaultWindowSizeS: Int64 = 250000
     /// The supported protocols are rtmp, rtmps, rtmpt and rtmps.
@@ -170,23 +172,9 @@ open class RTMPConnection: EventDispatcher {
     /// Specifies the URL of an HTTP referer.
     public var pageUrl: String?
     /// Specifies the time to wait for TCP/IP Handshake done.
-    public var timeout: Int {
-        get {
-            socket.timeout
-        }
-        set {
-            socket.timeout = newValue
-        }
-    }
+    public var timeout: Int = NetSocket.defaultTimeout
     /// Specifies the dispatchQos for socket.
-    public var qualityOfService: DispatchQoS {
-        get {
-            socket.qualityOfService
-        }
-        set {
-            socket.qualityOfService = newValue
-        }
-    }
+    public var qualityOfService: DispatchQoS = NetSocket.defaultQualityOfService
     /// Specifies the name of application.
     public var flashVer: String = RTMPConnection.defaultFlashVer
     /// Specifies theoutgoing RTMPChunkSize.
@@ -203,11 +191,11 @@ open class RTMPConnection: EventDispatcher {
     public var objectEncoding: RTMPObjectEncoding = RTMPConnection.defaultObjectEncoding
     /// The statistics of total incoming bytes.
     public var totalBytesIn: Int64 {
-        socket.totalBytesIn.value
+        socket?.totalBytesIn.value ?? 0
     }
     /// The statistics of total outgoing bytes.
     public var totalBytesOut: Int64 {
-        socket.totalBytesOut.value
+        socket?.totalBytesOut.value ?? 0
     }
     /// The statistics of total RTMPStream counts.
     public var totalStreamsCount: Int {
@@ -222,7 +210,12 @@ open class RTMPConnection: EventDispatcher {
     /// The statistics of outgoing bytes per second.
     @objc open private(set) dynamic var currentBytesOutPerSecond: Int32 = 0
 
-    var socket: (any RTMPSocketCompatible)!
+    var socket: (any RTMPSocketCompatible)? {
+        didSet {
+            oldValue?.delegate = nil
+            socket?.delegate = self
+        }
+    }
     var streams: [RTMPStream] = []
     var sequence: Int64 = 0
     var bandWidth: UInt32 = 0
@@ -230,7 +223,7 @@ open class RTMPConnection: EventDispatcher {
     var operations: [Int: RTMPResponder] = [:]
     var windowSizeC: Int64 = RTMPConnection.defaultWindowSizeS {
         didSet {
-            guard socket.connected else {
+            guard let socket, socket.connected else {
                 return
             }
             socket.doOutput(chunk: RTMPChunk(
@@ -245,7 +238,7 @@ open class RTMPConnection: EventDispatcher {
     private var timer: Timer? {
         didSet {
             oldValue?.invalidate()
-            if let timer = timer {
+            if let timer {
                 RunLoop.main.add(timer, forMode: .common)
             }
         }
@@ -271,8 +264,8 @@ open class RTMPConnection: EventDispatcher {
     }
 
     /// Calls a command or method on RTMP Server.
-    open func call(_ commandName: String, responder: RTMPResponder?, arguments: Any?...) {
-        guard connected else {
+    public func call(_ commandName: String, responder: RTMPResponder?, arguments: Any?...) {
+        guard let socket, connected else {
             return
         }
         currentTransactionId += 1
@@ -291,7 +284,7 @@ open class RTMPConnection: EventDispatcher {
     }
 
     /// Creates a two-way connection to an application on RTMP Server.
-    open func connect(_ command: String, arguments: Any?...) {
+    public func connect(_ command: String, arguments: Any?...) {
         guard let uri = URL(string: command), let scheme = uri.scheme, !connected && Self.supportedProtocols.contains(scheme) else {
             return
         }
@@ -307,23 +300,27 @@ open class RTMPConnection: EventDispatcher {
                 socket = socket is RTMPSocket ? socket : RTMPSocket()
             }
         }
-        socket.delegate = self
-        var outputBufferSize: Int = 0
-        for stream in streams {
-            // in bytes.
-            outputBufferSize += (Int(stream.mixer.videoIO.codec.settings.bitRate) + stream.mixer.audioIO.codec.settings.bitRate) / 8
+        socket.map {
+            $0.timeout = timeout
+            $0.qualityOfService = qualityOfService
+            let secure = uri.scheme == "rtmps" || uri.scheme == "rtmpts"
+            $0.securityLevel = secure ? .negotiatedSSL : .none
+            $0.delegate = self
+            var outputBufferSize: Int = 0
+            for stream in streams {
+                // in bytes.
+                outputBufferSize += (Int(stream.mixer.videoIO.settings.bitRate) + stream.mixer.audioIO.settings.bitRate) / 8
+            }
+            if $0.outputBufferSize < outputBufferSize {
+                $0.outputBufferSize = outputBufferSize
+            }
+            $0.setProperty(parameters, forKey: "parameters")
+            $0.connect(withName: uri.host!, port: uri.port ?? (secure ? Self.defaultSecurePort : Self.defaultPort))
         }
-        if socket.outputBufferSize < outputBufferSize {
-            socket.outputBufferSize = outputBufferSize
-        }
-        socket.setProperty(parameters, forKey: "parameters")
-        let secure = uri.scheme == "rtmps" || uri.scheme == "rtmpts"
-        socket.securityLevel = secure ? .negotiatedSSL : .none
-        socket.connect(withName: uri.host!, port: uri.port ?? (secure ? Self.defaultSecurePort : Self.defaultPort))
     }
 
     /// Closes the connection from the server.
-    open func close() {
+    public func close() {
         close(isDisconnected: false)
     }
 
@@ -339,10 +336,15 @@ open class RTMPConnection: EventDispatcher {
         for stream in streams {
             stream.close()
         }
-        socket.close(isDisconnected: false)
+        socket?.close(isDisconnected: false)
     }
 
     func createStream(_ stream: RTMPStream) {
+        if let fcPublishName = stream.fcPublishName {
+            // FMLE-compatible sequences
+            call("releaseStream", responder: RTMPResponder.empty, arguments: fcPublishName)
+            call("FCPublish", responder: RTMPResponder.empty, arguments: fcPublishName)
+        }
         let responder = RTMPResponder(result: { data -> Void in
             guard let id = data[0] as? Double else {
                 return
@@ -366,6 +368,9 @@ open class RTMPConnection: EventDispatcher {
         switch Code(rawValue: code) {
         case .some(.connectSuccess):
             connected = true
+            guard let socket else {
+                return
+            }
             socket.chunkSizeS = chunkSize
             socket.doOutput(chunk: RTMPChunk(
                 type: .zero,
@@ -380,7 +385,7 @@ open class RTMPConnection: EventDispatcher {
                 let description = data["description"] as? String else {
                 break
             }
-            socket.close(isDisconnected: false)
+            socket?.close(isDisconnected: false)
             switch true {
             case description.contains("reason=nosuchuser"):
                 break
@@ -450,11 +455,12 @@ open class RTMPConnection: EventDispatcher {
     private func on(timer: Timer) {
         let totalBytesIn = self.totalBytesIn
         let totalBytesOut = self.totalBytesOut
+        let queueBytesOut = self.socket?.queueBytesOut.value ?? 0
         currentBytesInPerSecond = Int32(totalBytesIn - previousTotalBytesIn)
         currentBytesOutPerSecond = Int32(totalBytesOut - previousTotalBytesOut)
         previousTotalBytesIn = totalBytesIn
         previousTotalBytesOut = totalBytesOut
-        previousQueueBytesOut.append(socket.queueBytesOut.value)
+        previousQueueBytesOut.append(queueBytesOut)
         for stream in streams {
             stream.on(timer: timer)
         }
@@ -465,10 +471,20 @@ open class RTMPConnection: EventDispatcher {
             }
             if total == measureInterval - 1 {
                 for stream in streams {
+                    stream.bitrateStrategy.insufficientBWOccured(IOStreamBitRateStats(
+                        currentQueueBytesOut: queueBytesOut,
+                        currentBytesInPerSecond: currentBytesInPerSecond,
+                        currentBytesOutPerSecond: currentBytesOutPerSecond
+                    ))
                     delegate?.connection(self, publishInsufficientBWOccured: stream)
                 }
             } else if total == 0 {
                 for stream in streams {
+                    stream.bitrateStrategy.sufficientBWOccured(IOStreamBitRateStats(
+                        currentQueueBytesOut: queueBytesOut,
+                        currentBytesInPerSecond: currentBytesInPerSecond,
+                        currentBytesOutPerSecond: currentBytesOutPerSecond
+                    ))
                     delegate?.connection(self, publishSufficientBWOccured: stream)
                 }
             }

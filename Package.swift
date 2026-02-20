@@ -5,8 +5,9 @@ import PackageDescription
 let package = Package(
     name: "HaishinKit",
     platforms: [
+        .iOS(.v12),
         .tvOS(.v12),
-        .iOS(.v13),
+        .visionOS(.v1),
         .macOS(.v10_13),
         .macCatalyst(.v14)
     ],
@@ -31,8 +32,7 @@ let package = Package(
                     "Codec",
                     "Extension",
                     "FLV",
-                    "HTTP",
-                    "Media",
+                    "IO",
                     "MPEG",
                     "Net",
                     "RTMP",

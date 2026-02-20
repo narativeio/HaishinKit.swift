@@ -14,6 +14,12 @@ extension AVCaptureDevice.Format {
         return true
     }
 }
+#elseif os(visionOS)
+extension AVCaptureDevice.Format {
+    var isMultiCamSupported: Bool {
+        return false
+    }
+}
 #endif
 
 @available(tvOS 17.0, *)
