@@ -68,6 +68,12 @@ public enum DeviceUtil {
         }
         return !DeviceUtil.isHeadphoneConnected(ports)
     }
+    
+    public static func device(with position: AVCaptureDevice.Position) -> AVCaptureDevice? {
+        AVCaptureDevice.devices().first {
+            $0.hasMediaType(.video) && $0.position == position
+        }
+    }
 }
 #elseif os(macOS)
 /// The namespace of DeviceUtil.

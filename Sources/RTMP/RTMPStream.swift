@@ -251,7 +251,7 @@ open class RTMPStream: IOStream {
     private weak var connection: RTMPConnection?
 
     /// Creates a new stream.
-    public init(connection: RTMPConnection, fcPublishName: String? = nil) {
+    public init(connection: RTMPConnection, fcPublishName: String? = nil, isSecondary: Bool = false) {
         self.connection = connection
         super.init()
         self.fcPublishName = fcPublishName
@@ -259,6 +259,7 @@ open class RTMPStream: IOStream {
         connection.streams.append(self)
         addEventListener(.rtmpStatus, selector: #selector(on(status:)), observer: self)
         connection.addEventListener(.rtmpStatus, selector: #selector(on(status:)), observer: self)
+        mixer.isSecondary = isSecondary
         if connection.connected {
             connection.createStream(self)
         }

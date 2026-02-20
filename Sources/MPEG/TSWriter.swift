@@ -257,7 +257,7 @@ extension TSWriter: IOMuxer {
 }
 
 extension TSWriter: Running {
-    public func startRunning() {
+    public func startRunning(name: String? = nil) {
         guard isRunning.value else {
             return
         }

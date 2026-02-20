@@ -200,7 +200,7 @@ final class SRTSocket<T: SRTSocketDelegate> {
 
 extension SRTSocket: Running {
     // MARK: Running
-    func startRunning() {
+    func startRunning(name: String? = nil) {
         guard !isRunning.value else {
             return
         }

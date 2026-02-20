@@ -76,6 +76,12 @@ final class IOAudioRingBuffer {
         skip = max(Int(targetSampleTime - sampleTime), 0)
         sampleTime += Int64(skip)
         append(inputBuffer)
+        
+        let distance = distance(sampleBuffer)
+               if 0 <= distance {
+                   skip = distance
+               }
+               appendAudioPCMBuffer(workingBuffer, offset: offsetCount(sampleBuffer) / 8)
     }
 
     func append(_ audioPCMBuffer: AVAudioPCMBuffer, when: AVAudioTime) {
@@ -89,14 +95,59 @@ final class IOAudioRingBuffer {
         }
         inputBuffer.frameLength = audioPCMBuffer.frameLength
         _ = inputBuffer.copy(audioPCMBuffer)
+        
         skip = Int(max(when.sampleTime - sampleTime, 0))
         sampleTime += Int64(skip)
-        append(inputBuffer)
+        
+        //append(inputBuffer)
+        
+        let distance = distance(inputBuffer)
+        if 0 <= distance {
+            skip = distance
+        }
+        append(inputBuffer, offset: offsetCount(inputBuffer) / 8)
+    }
+    
+    private func distance(_ sampleBuffer: CMSampleBuffer) -> Int {
+        // Device audioMic or ReplayKit audioMic.
+        let sampleRate = Int32(format.sampleRate)
+        
+        if presentationTimeStamp.timescale == sampleRate {
+            let presentationTimeStamp = CMTimeAdd(presentationTimeStamp, CMTime(value: CMTimeValue(counts), timescale: presentationTimeStamp.timescale))
+//            return max(Int(sampleBuffer.presentationTimeStamp.value - presentationTimeStamp.value), 0)
+            return Int(sampleBuffer.presentationTimeStamp.value - presentationTimeStamp.value)
+        }
+
+        return 0
+    }
+    
+    private func offsetCount(_ sampleBuffer: CMSampleBuffer) -> Int {
+        let data = sampleBuffer.dataBuffer?.data?.bytes ?? []
+        let count = 0
+        
+        for i in 0..<data.count {
+            guard data.count > i * 2 * 4 else { break }
+
+            if (data[i * 2 * 4] != 0) {
+                return i * 2 * 4
+            }
+        }
+
+        return count
     }
 
     @inline(__always)
     private func append(_ audioPCMBuffer: AVAudioPCMBuffer, offset: Int = 0) {
         let numSamples = min(Int(audioPCMBuffer.frameLength) - offset, Int(outputBuffer.frameLength) - head)
+        
+        
+        if #available(iOS 17.0, *) {
+            SampleData.shared.append(numSamples)
+            if SampleData.shared.audioStreamBasicDescription == nil || SampleData.shared.audioStreamBasicDescription?.mChannelsPerFrame != inputFormat.channelCount {
+                SampleData.shared.audioStreamBasicDescription = inputFormat.streamDescription.pointee
+            }
+        }
+        
         if inputFormat.isInterleaved {
             let channelCount = Int(inputFormat.channelCount)
             switch inputFormat.commonFormat {

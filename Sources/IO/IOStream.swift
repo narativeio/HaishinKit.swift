@@ -448,15 +448,19 @@ open class IOStream: NSObject {
     }
 
     /// Starts recording.
-    public func startRecording(_ delegate: any IORecorderDelegate, settings: [AVMediaType: [String: Any]] = IORecorder.defaultOutputSettings) {
+    public func startRecording(with name: String? = nil, _ delegate: any IORecorderDelegate, settings: [AVMediaType: [String: Any]] = IORecorder.defaultOutputSettings) {
         mixer.recorder.delegate = delegate
         mixer.recorder.outputSettings = settings
-        mixer.recorder.startRunning()
+        mixer.recorder.startRunning(name: name)
     }
-
+    
     /// Stop recording.
     public func stopRecording() {
         mixer.recorder.stopRunning()
+    }
+    
+    open func dispose() {
+        mixer.dispose(shouldCleanSession: false)
     }
 
     /// A handler that receives stream readyState will update.

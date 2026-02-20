@@ -246,7 +246,7 @@ public final class IORecorder {
 
 extension IORecorder: Running {
     // MARK: Running
-    public func startRunning() {
+    public func startRunning(name: String? = nil) {
         lockQueue.async {
             guard !self.isRunning.value else {
                 return
@@ -254,7 +254,8 @@ extension IORecorder: Running {
             do {
                 self.videoPresentationTime = .zero
                 self.audioPresentationTime = .zero
-                let url = self.moviesDirectory.appendingPathComponent((UUID().uuidString)).appendingPathExtension("mp4")
+                let filename = name ?? UUID().uuidString
+                let url = self.moviesDirectory.appendingPathComponent(filename).appendingPathExtension("mp4")
                 self.writer = try AVAssetWriter(outputURL: url, fileType: .mp4)
                 self.isRunning.mutate { $0 = true }
             } catch {

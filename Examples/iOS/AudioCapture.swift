@@ -13,7 +13,7 @@ final class AudioCapture {
 }
 
 extension AudioCapture: Running {
-    func startRunning() {
+    func startRunning(name: String? = nil) {
         guard !isRunning.value else {
             return
         }

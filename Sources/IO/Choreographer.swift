@@ -132,7 +132,7 @@ final class DisplayLinkChoreographer: NSObject, Choreographer {
 }
 
 extension DisplayLinkChoreographer: Running {
-    func startRunning() {
+    func startRunning(name: String? = nil) {
         displayLink = DisplayLink(target: self, selector: #selector(self.update(displayLink:)))
         isRunning.mutate { $0 = true }
     }

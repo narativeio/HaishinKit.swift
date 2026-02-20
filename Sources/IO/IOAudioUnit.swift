@@ -1,4 +1,5 @@
 import AVFoundation
+import SwiftUI
 
 #if canImport(SwiftPMSupport)
 import SwiftPMSupport
@@ -17,11 +18,11 @@ protocol IOAudioUnitDelegate: AnyObject {
     func audioUnit(_ audioUnit: IOAudioUnit, didOutput audioBuffer: AVAudioPCMBuffer, when: AVAudioTime)
 }
 
-final class IOAudioUnit: NSObject, IOUnit {
+public final class IOAudioUnit: NSObject, IOUnit {
     typealias FormatDescription = AVAudioFormat
 
     let lockQueue = DispatchQueue(label: "com.haishinkit.HaishinKit.IOAudioUnit.lock")
-    var muted = false
+    public var muted = false
     weak var mixer: IOMixer?
     var isMonitoringEnabled = false {
         didSet {
@@ -116,7 +117,15 @@ final class IOAudioUnit: NSObject, IOUnit {
 @available(tvOS 17.0, *)
 extension IOAudioUnit: AVCaptureAudioDataOutputSampleBufferDelegate {
     // MARK: AVCaptureAudioDataOutputSampleBufferDelegate
-    func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
+    public func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
+        
+        // TODO Create class Cleaner qui prend en input le sampleBuffer et retourne un sampleBuffer clean
+        // Faire un passe plat par défaut, et ne faire des modifs que dans certaines conditions
+        // If no zeros => [PTS suivant] = [PTS actuel] + [num samples actuel]
+        // If zeros =>
+        //      - [PTS suivant] = [PTS actuel] + [num samples actuel] - [nombre de zéros enlevés]
+        //      - enlever les zéros du début du buffer
+        
         resampler.append(sampleBuffer.muted(muted))
     }
 }
@@ -124,7 +133,7 @@ extension IOAudioUnit: AVCaptureAudioDataOutputSampleBufferDelegate {
 
 extension IOAudioUnit: Running {
     // MARK: Running
-    func startRunning() {
+    func startRunning(name: String? = nil) {
         codec.startRunning()
     }
 
@@ -135,19 +144,76 @@ extension IOAudioUnit: Running {
 
 extension IOAudioUnit: IOAudioResamplerDelegate {
     // MARK: IOAudioResamplerDelegate
-    func resampler(_ resampler: IOAudioResampler<IOAudioUnit>, errorOccurred error: IOAudioUnitError) {
+    public func resampler(_ resampler: IOAudioResampler<IOAudioUnit>, errorOccurred error: IOAudioUnitError) {
         mixer?.audioUnit(self, errorOccurred: error)
     }
 
-    func resampler(_ resampler: IOAudioResampler<IOAudioUnit>, didOutput audioFormat: AVAudioFormat) {
+    public func resampler(_ resampler: IOAudioResampler<IOAudioUnit>, didOutput audioFormat: AVAudioFormat) {
         inputFormat = resampler.inputFormat
         codec.inputFormat = audioFormat
         monitor.inputFormat = audioFormat
     }
 
-    func resampler(_ resampler: IOAudioResampler<IOAudioUnit>, didOutput audioBuffer: AVAudioPCMBuffer, when: AVAudioTime) {
+    public func resampler(_ resampler: IOAudioResampler<IOAudioUnit>, didOutput audioBuffer: AVAudioPCMBuffer, when: AVAudioTime) {
         mixer?.audioUnit(self, didOutput: audioBuffer, when: when)
         monitor.append(audioBuffer, when: when)
         codec.append(audioBuffer, when: when)
+    }
+}
+
+
+public struct SampleDataPoint: Identifiable {
+    public let date: Date = Date()
+    public let value: Int
+
+    public var id: Int { Int(date.timeIntervalSince1970) }
+
+    public init(value: Int) {
+        self.value = value
+    }
+}
+
+@available(iOS 17.0, *)
+@Observable public class SampleData {
+    public static let shared = SampleData()
+    public var values: [SampleDataPoint] = []
+    public var audioStreamBasicDescription: AudioStreamBasicDescription? = .none
+    public var commonFormat: AVAudioCommonFormat? = .none
+    public var interleaved: Bool = false
+    var tmpValues: [SampleDataPoint] = []
+    var refreshCount = 0
+
+    public var inter: String {
+        var value: String = ""
+
+        if interleaved {
+            value = "true"
+        } else {
+            value = "false"
+        }
+
+        return value
+    }
+
+    public init() {}
+
+    public init(values: [SampleDataPoint]) {
+        self.values = values
+    }
+
+    func append(_ value: Int) {
+        let point = SampleDataPoint(value: value)
+        tmpValues.append(point)
+        refreshCount += 1
+
+        if tmpValues.count > 200 {
+            tmpValues.removeFirst()
+        }
+
+        if self.refreshCount > 200 {
+            self.refreshCount = 0
+            self.values = []
+            self.values = self.tmpValues
+        }
     }
 }

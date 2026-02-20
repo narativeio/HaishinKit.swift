@@ -186,7 +186,7 @@ extension AudioCodec: Codec {
 
 extension AudioCodec: Running {
     // MARK: Running
-    func startRunning() {
+    func startRunning(name: String? = nil) {
         lockQueue.async {
             guard !self.isRunning.value else {
                 return

@@ -21,7 +21,8 @@ Carthage/*
 .vscode/
 .swiftpm/
 
-HaishinKit.xcodeproj/project.xcworkspace/xcuserdata/shogo.xcuserdatad/WorkspaceSettings.xcsettings
+HaishinKit.xcodeproj/project.xcworkspace/xcuserdata/shogo.xcuserdatad/
+HaishinKit.xcodeproj/project.xcworkspace/xcuserdata/nourhenekrichene.xcuserdatad/WorkspaceSettings.xcsettings
 *.xcsettings
 docs/undocumented.json
 fastlane/report.xml

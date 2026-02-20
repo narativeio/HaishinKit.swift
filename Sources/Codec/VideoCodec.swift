@@ -207,7 +207,7 @@ final class VideoCodec<T: VideoCodecDelegate> {
 
 extension VideoCodec: Running {
     // MARK: Running
-    func startRunning() {
+    func startRunning(name: String? = nil) {
         lockQueue.async {
             #if os(iOS) || os(tvOS) || os(visionOS)
             NotificationCenter.default.addObserver(

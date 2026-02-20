@@ -144,7 +144,7 @@ public class IOUIScreenCaptureUnit: NSObject, IOScreenCaptureUnit {
 
 extension IOUIScreenCaptureUnit: Running {
     // MARK: Running
-    public func startRunning() {
+    public func startRunning(name: String? = nil) {
         lockQueue.sync {
             guard !self.isRunning.value else {
                 return

@@ -29,19 +29,19 @@ final class IOMixer {
 
     private(set) lazy var recorder = IORecorder()
 
-    private(set) lazy var audioIO = {
+    public lazy var audioIO = {
         var audioIO = IOAudioUnit()
         audioIO.mixer = self
         return audioIO
     }()
 
-    private(set) lazy var videoIO = {
+    public lazy var videoIO = {
         var videoIO = IOVideoUnit()
         videoIO.mixer = self
         return videoIO
     }()
 
-    private(set) lazy var session = {
+    public lazy var session = {
         var session = IOCaptureSession()
         session.delegate = self
         return session
@@ -50,9 +50,24 @@ final class IOMixer {
     private(set) lazy var audioEngine: AVAudioEngine? = {
         return IOStream.audioEngineHolder.retain()
     }()
+    
+    var isSecondary: Bool = false
 
     deinit {
+        dispose(shouldCleanSession: !isSecondary)
         IOStream.audioEngineHolder.release(audioEngine)
+    }
+    
+    public func dispose(shouldCleanSession: Bool = true) {
+        #if os(iOS) || os(macOS)
+        if session.isRunning && shouldCleanSession {
+            session.stopRunning()
+        }
+        #endif
+
+        IOMixer.audioEngineHolder.release(audioEngine)
+        try? audioIO.attachAudio(nil, automaticallyConfiguresApplicationAudioSession: false)
+        try? videoIO.attachCamera(nil)
     }
 
     #if os(iOS) || os(tvOS) || os(visionOS)
@@ -72,7 +87,7 @@ final class IOMixer {
 
 extension IOMixer: Running {
     // MARK: Running
-    func startRunning() {
+    func startRunning(name: String? = nil) {
         guard !isRunning.value else {
             return
         }
@@ -83,7 +98,7 @@ extension IOMixer: Running {
     }
 
     func stopRunning() {
-        guard isRunning.value else {
+        guard isRunning.value && !isSecondary else {
             return
         }
         videoIO.stopRunning()

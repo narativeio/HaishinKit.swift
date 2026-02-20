@@ -30,5 +30,12 @@ final class IOAudioCaptureUnit: IOCaptureUnit {
     func setSampleBufferDelegate(_ audioUnit: IOAudioUnit?) {
         output?.setSampleBufferDelegate(audioUnit, queue: audioUnit?.lockQueue)
     }
+    
+    func dispose() {
+        input = nil
+        output = nil
+        connection = nil
+    }
+
 }
 #endif

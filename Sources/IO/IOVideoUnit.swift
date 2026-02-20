@@ -257,7 +257,7 @@ final class IOVideoUnit: NSObject, IOUnit {
 
 extension IOVideoUnit: Running {
     // MARK: Running
-    func startRunning() {
+    func startRunning(name: String? = nil) {
         #if os(iOS)
         codec.passthrough = captures[0]?.preferredVideoStabilizationMode == .off
         #endif

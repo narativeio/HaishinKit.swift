@@ -194,6 +194,12 @@ public final class IOVideoCaptureUnit: IOCaptureUnit {
         dataOutput = videoUnit?.makeVideoDataOutputSampleBuffer(channel)
         output?.setSampleBufferDelegate(dataOutput, queue: videoUnit?.lockQueue)
     }
+    
+    func dispose() {
+        input = nil
+        output = nil
+        connection = nil
+    }
 }
 
 // swiftlint:disable:next type_name
