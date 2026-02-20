@@ -19,17 +19,22 @@ final class SRTSocket {
     weak var delegate: (any SRTSocketDelegate)?
 
     private(set) var mode: SRTMode = .caller
+
+    // NOTE: perf est rempli par srt_bstats(). On le protège via srtQueue.
     private(set) var perf: CBytePerfMon = .init()
+
     private(set) var isRunning: HaishinKit.Atomic<Bool> = .init(false)
-    private(set) var socket: SRTSOCKET = SRT_INVALID_SOCK
 
-    private var isClosing = HaishinKit.Atomic<Bool>(false)
+    // Empêche les sends/reads pendant close()
+    private var isClosing: HaishinKit.Atomic<Bool> = .init(false)
 
-    /// ✅ UNIQUE libsrt queue
+    // ✅ Queue unique pour TOUS les appels libsrt
     private let srtQueue = DispatchQueue(
         label: "com.haishinkit.SRTHaishinKit.SRTSocket.srt",
         qos: .userInitiated
     )
+
+    private(set) var socket: SRTSOCKET = SRT_INVALID_SOCK
 
     private(set) var status: SRT_SOCKSTATUS = SRTS_INIT {
         didSet {
@@ -65,6 +70,8 @@ final class SRTSocket {
     }
 
     private var windowSizeC: Int32 = 1024 * 4
+
+    // outgoingBuffer: accès UNIQUEMENT via outgoingQueue
     private var outgoingBuffer: [Data] = []
     private lazy var incomingBuffer: Data = .init(count: Int(windowSizeC))
 
@@ -77,8 +84,6 @@ final class SRTSocket {
         label: "com.haishinkit.SRTHaishinKit.SRTSocket.incoming",
         qos: .userInitiated
     )
-
-    // MARK: - Init
 
     init() {}
 
@@ -99,38 +104,44 @@ final class SRTSocket {
               mode: SRTMode,
               options: [SRTSocketOption: Any] = SRTSocket.defaultOptions) throws {
 
-        guard socket == SRT_INVALID_SOCK else { return }
+        // toute init/close socket = srtQueue
+        try srtQueue.sync {
+            guard socket == SRT_INVALID_SOCK else { return }
 
-        self.mode = mode
-        socket = srt_create_socket()
+            self.mode = mode
+            socket = srt_create_socket()
 
-        guard socket != SRT_INVALID_SOCK else {
-            throw makeSocketError()
-        }
-
-        self.options = options
-        guard configure(.pre) else { throw makeSocketError() }
-
-        var addr_cp = addr
-        let stat = withUnsafePointer(to: &addr_cp) { ptr -> Int32 in
-            let psa = UnsafeRawPointer(ptr).assumingMemoryBound(to: sockaddr.self)
-            return mode.open(socket, psa, Int32(MemoryLayout.size(ofValue: addr)))
-        }
-
-        guard stat != SRT_ERROR else {
-            throw makeSocketError()
-        }
-
-        switch mode {
-        case .caller:
-            guard configure(.post) else {
+            guard socket != SRT_INVALID_SOCK else {
                 throw makeSocketError()
             }
-        case .listener:
-            let listenStat = srt_listen(socket, 1)
-            guard listenStat != SRT_ERROR else {
-                srt_close(socket)
+
+            self.options = options
+            guard configure(.pre) else { throw makeSocketError() }
+
+            var addr_cp = addr
+            let stat = withUnsafePointer(to: &addr_cp) { ptr -> Int32 in
+                let psa = UnsafeRawPointer(ptr).assumingMemoryBound(to: sockaddr.self)
+                return mode.open(socket, psa, Int32(MemoryLayout.size(ofValue: addr)))
+            }
+
+            guard stat != SRT_ERROR else {
                 throw makeSocketError()
+            }
+
+            switch mode {
+            case .caller:
+                guard configure(.post) else { throw makeSocketError() }
+                if incomingBuffer.count < windowSizeC {
+                    incomingBuffer = .init(count: Int(windowSizeC))
+                }
+
+            case .listener:
+                let listenStat = srt_listen(socket, 1)
+                guard listenStat != SRT_ERROR else {
+                    srt_close(socket)
+                    socket = SRT_INVALID_SOCK
+                    throw makeSocketError()
+                }
             }
         }
 
@@ -144,23 +155,17 @@ final class SRTSocket {
             guard let self else { return }
             guard !self.isClosing.value else { return }
 
-            // ✅ outgoingBuffer TOUJOURS touché uniquement sur outgoingQueue
+            // buffer géré uniquement ici
             self.outgoingBuffer.append(contentsOf: data.chunk(Self.payloadSize))
 
             while !self.outgoingBuffer.isEmpty {
                 if self.isClosing.value { break }
-                if self.socket == SRT_INVALID_SOCK { break }
 
                 var chunk = self.outgoingBuffer[0]
 
                 let sent: Int32 = self.srtQueue.sync {
                     guard self.socket != SRT_INVALID_SOCK else { return SRT_ERROR }
-                    return chunk.withUnsafeBytes { ptr in
-                        guard let buffer = ptr.baseAddress?.assumingMemoryBound(to: CChar.self) else {
-                            return SRT_ERROR
-                        }
-                        return srt_sendmsg2(self.socket, buffer, Int32(chunk.count), nil)
-                    }
+                    return self._sendmsg2(&chunk)
                 }
 
                 if sent == SRT_ERROR {
@@ -179,52 +184,37 @@ final class SRTSocket {
             guard let self else { return }
 
             while self.isRunning.value {
+                if self.isClosing.value { break }
 
                 let result: Int32 = self.srtQueue.sync {
                     guard self.socket != SRT_INVALID_SOCK else { return SRT_ERROR }
-                    return self.incomingBuffer.withUnsafeMutableBytes { ptr in
-                        guard let buffer = ptr.baseAddress?.assumingMemoryBound(to: CChar.self) else {
-                            return SRT_ERROR
-                        }
-                        return srt_recvmsg(self.socket, buffer, self.windowSizeC)
-                    }
+                    return self._recvmsg()
                 }
 
                 if result > 0 {
+                    // Important: on copie le payload “utile”
                     let packet = Data(self.incomingBuffer.prefix(Int(result)))
-                    self.delegate?.socket(self,
-                        incomingDataAvailabled: packet,
-                        bytes: result)
-
+                    self.delegate?.socket(self, incomingDataAvailabled: packet, bytes: result)
                 } else {
-                    usleep(5_000)
+                    usleep(5_000) // anti busy-loop
                 }
             }
-        }
-    }
-
-    // MARK: - Stats
-
-    func bstats() -> Int32 {
-        return srtQueue.sync {
-            guard socket != SRT_INVALID_SOCK else { return SRT_ERROR }
-            return srt_bstats(socket, &perf, 1)
         }
     }
 
     // MARK: - Close
 
     func close() {
-        // ✅ empêche tout nouveau send
+        // 1) stop nouveaux envois / lectures
         isClosing.mutate { $0 = true }
+        stopRunning()
 
-        // ✅ attend que tous les doOutput en cours finissent
+        // 2) attendre la fin des envois en cours + vider buffer
         outgoingQueue.sync {
             outgoingBuffer.removeAll()
         }
 
-        stopRunning()
-
+        // 3) fermer socket côté libsrt
         srtQueue.sync {
             guard socket != SRT_INVALID_SOCK else { return }
             srt_close(socket)
@@ -234,21 +224,70 @@ final class SRTSocket {
         isClosing.mutate { $0 = false }
     }
 
-    // MARK: - Helpers
+    // MARK: - Options / Stats
 
     func configure(_ binding: SRTSocketOption.Binding) -> Bool {
-        let failures = SRTSocketOption.configure(socket, binding: binding, options: options)
-        guard failures.isEmpty else {
-            logger.error(failures)
-            return false
+        // configure touche libsrt => protéger
+        return srtQueue.sync {
+            let failures = SRTSocketOption.configure(socket, binding: binding, options: options)
+            guard failures.isEmpty else {
+                logger.error(failures)
+                return false
+            }
+            return true
         }
-        return true
+    }
+
+    func bstats() -> Int32 {
+        return srtQueue.sync {
+            guard socket != SRT_INVALID_SOCK else { return SRT_ERROR }
+            return srt_bstats(socket, &perf, 1)
+        }
+    }
+
+    private func accept() {
+        // accept = libsrt => srtQueue
+        let clientSock: SRTSOCKET = srtQueue.sync {
+            guard socket != SRT_INVALID_SOCK else { return SRT_INVALID_SOCK }
+            return srt_accept(socket, nil, nil)
+        }
+        guard clientSock != SRT_INVALID_SOCK else { return }
+
+        do {
+            delegate?.socket(self, didAcceptSocket: try SRTSocket(socket: clientSock))
+        } catch {
+            logger.error(error)
+        }
     }
 
     private func makeSocketError() -> SRTError {
         let error_message = String(cString: srt_getlasterror_str())
         logger.error(error_message)
         return SRTError.illegalState(message: error_message)
+    }
+
+    // MARK: - libsrt wrappers (appelés UNIQUEMENT depuis srtQueue)
+
+    @inline(__always)
+    private func _sendmsg2(_ data: inout Data) -> Int32 {
+        guard socket != SRT_INVALID_SOCK else { return SRT_ERROR }
+        return data.withUnsafeBytes { pointer in
+            guard let buffer = pointer.baseAddress?.assumingMemoryBound(to: CChar.self) else {
+                return SRT_ERROR
+            }
+            return srt_sendmsg2(socket, buffer, Int32(data.count), nil)
+        }
+    }
+
+    @inline(__always)
+    private func _recvmsg() -> Int32 {
+        guard socket != SRT_INVALID_SOCK else { return SRT_ERROR }
+        return incomingBuffer.withUnsafeMutableBytes { pointer in
+            guard let buffer = pointer.baseAddress?.assumingMemoryBound(to: CChar.self) else {
+                return SRT_ERROR
+            }
+            return srt_recvmsg(socket, buffer, windowSizeC)
+        }
     }
 }
 
@@ -262,27 +301,25 @@ extension SRTSocket: Running {
         isRunning.mutate { $0 = true }
 
         DispatchQueue(label: "com.haishkinkit.SRTHaishinKit.SRTSocket.runloop")
-            .async {
+            .async { [weak self] in
+                guard let self else { return }
 
-                repeat {
+                while self.isRunning.value {
+                    if self.isClosing.value { break }
 
-                    let state = self.srtQueue.sync {
-                        srt_getsockstate(self.socket)
+                    let state: SRT_SOCKSTATUS = self.srtQueue.sync {
+                        guard self.socket != SRT_INVALID_SOCK else { return SRTS_NONEXIST }
+                        return srt_getsockstate(self.socket)
                     }
 
                     self.status = state
 
-                    switch self.mode {
-                    case .listener:
-                        // si tu utilises accept() garde-le ici
-                        break
-                    default:
-                        break
+                    if self.mode == .listener, state == SRTS_LISTENING {
+                        self.accept()
                     }
 
                     usleep(30_000)
-
-                } while self.isRunning.value
+                }
             }
     }
 
