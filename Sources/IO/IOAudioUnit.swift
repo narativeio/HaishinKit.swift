@@ -131,7 +131,7 @@ extension IOAudioUnit: AVCaptureAudioDataOutputSampleBufferDelegate {
 }
 #endif
 
-extension IOAudioUnit: Running {
+public extension IOAudioUnit: Running {
     // MARK: Running
     func startRunning(name: String? = nil) {
         codec.startRunning()

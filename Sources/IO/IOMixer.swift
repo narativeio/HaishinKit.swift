@@ -55,19 +55,18 @@ final class IOMixer {
 
     deinit {
         dispose(shouldCleanSession: !isSecondary)
-        IOStream.audioEngineHolder.release(audioEngine)
     }
     
     public func dispose(shouldCleanSession: Bool = true) {
         #if os(iOS) || os(macOS)
-        if session.isRunning && shouldCleanSession {
+        if session.isRunning.value && shouldCleanSession {
             session.stopRunning()
         }
         #endif
 
-        IOMixer.audioEngineHolder.release(audioEngine)
+        IOStream.audioEngineHolder.release(audioEngine)
         try? audioIO.attachAudio(nil, automaticallyConfiguresApplicationAudioSession: false)
-        try? videoIO.attachCamera(nil)
+        try? videoIO.attachCamera(nil, channel: 0, configuration: nil)
     }
 
     #if os(iOS) || os(tvOS) || os(visionOS)
@@ -91,7 +90,7 @@ extension IOMixer: Running {
         guard !isRunning.value else {
             return
         }
-        muxer?.startRunning()
+        muxer?.startRunning(name: name)
         audioIO.startRunning()
         videoIO.startRunning()
         isRunning.mutate { $0 = true }

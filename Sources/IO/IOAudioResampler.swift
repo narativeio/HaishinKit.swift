@@ -4,7 +4,7 @@ import AVFoundation
 private let kIOAudioResampler_frameCapacity: AVAudioFrameCount = 1024
 private let kIOAudioResampler_sampleTime: AVAudioFramePosition = 0
 
-protocol IOAudioResamplerDelegate: AnyObject {
+public protocol IOAudioResamplerDelegate: AnyObject {
     func resampler(_ resampler: IOAudioResampler<Self>, didOutput audioFormat: AVAudioFormat)
     func resampler(_ resampler: IOAudioResampler<Self>, didOutput audioPCMBuffer: AVAudioPCMBuffer, when: AVAudioTime)
     func resampler(_ resampler: IOAudioResampler<Self>, errorOccurred error: IOAudioUnitError)

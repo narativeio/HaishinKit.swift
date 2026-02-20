@@ -73,15 +73,16 @@ final class IOAudioRingBuffer {
                 }
             }
         }
-        skip = max(Int(targetSampleTime - sampleTime), 0)
-        sampleTime += Int64(skip)
-        append(inputBuffer)
+//        skip = max(Int(targetSampleTime - sampleTime), 0)
+//        sampleTime += Int64(skip)
+//        append(inputBuffer)
         
         let distance = distance(sampleBuffer)
-               if 0 <= distance {
-                   skip = distance
-               }
-               appendAudioPCMBuffer(workingBuffer, offset: offsetCount(sampleBuffer) / 8)
+        if 0 <= distance {
+            skip = distance
+        }
+
+        append(inputBuffer, offset: offsetCount(sampleBuffer))
     }
 
     func append(_ audioPCMBuffer: AVAudioPCMBuffer, when: AVAudioTime) {
@@ -95,45 +96,44 @@ final class IOAudioRingBuffer {
         }
         inputBuffer.frameLength = audioPCMBuffer.frameLength
         _ = inputBuffer.copy(audioPCMBuffer)
-        
+                
         skip = Int(max(when.sampleTime - sampleTime, 0))
         sampleTime += Int64(skip)
-        
-        //append(inputBuffer)
-        
-        let distance = distance(inputBuffer)
-        if 0 <= distance {
-            skip = distance
-        }
-        append(inputBuffer, offset: offsetCount(inputBuffer) / 8)
+        append(inputBuffer)
     }
     
     private func distance(_ sampleBuffer: CMSampleBuffer) -> Int {
-        // Device audioMic or ReplayKit audioMic.
-        let sampleRate = Int32(format.sampleRate)
-        
-        if presentationTimeStamp.timescale == sampleRate {
-            let presentationTimeStamp = CMTimeAdd(presentationTimeStamp, CMTime(value: CMTimeValue(counts), timescale: presentationTimeStamp.timescale))
-//            return max(Int(sampleBuffer.presentationTimeStamp.value - presentationTimeStamp.value), 0)
-            return Int(sampleBuffer.presentationTimeStamp.value - presentationTimeStamp.value)
+        let sampleRate = Int32(inputFormat.sampleRate)
+
+        if sampleBuffer.presentationTimeStamp.timescale == sampleRate {
+            let presentation = sampleBuffer.presentationTimeStamp.value
+            return Int(presentation - sampleTime)
         }
 
         return 0
     }
     
     private func offsetCount(_ sampleBuffer: CMSampleBuffer) -> Int {
-        let data = sampleBuffer.dataBuffer?.data?.bytes ?? []
-        let count = 0
-        
-        for i in 0..<data.count {
-            guard data.count > i * 2 * 4 else { break }
+        let channelCount = Int(inputFormat.channelCount)
 
-            if (data[i * 2 * 4] != 0) {
-                return i * 2 * 4
-            }
+        guard AVAudioSession.sharedInstance().mode == .videoChat && channelCount == 4 else {
+            return 0
         }
 
-        return count
+        let multiplier = inputFormat.commonFormat == .pcmFormatInt16 ? 2 : 4
+        let data = sampleBuffer.dataBuffer?.data?.bytes ?? []
+        var count = 0
+
+        for i in 0..<data.count {
+            guard data[i] == 0 else { break }
+            count += 1
+        }
+
+        if count == 64 * multiplier * channelCount {
+            return count / (multiplier * channelCount)
+        } else {
+            return 0
+        }
     }
 
     @inline(__always)
