@@ -15,11 +15,11 @@ public enum IOVideoUnitError: Error {
     case failedToSetOption(status: OSStatus, option: VTSessionOption)
 }
 
-protocol IOVideoUnitDelegate: AnyObject {
+publicprotocol IOVideoUnitDelegate: AnyObject {
     func videoUnit(_ videoUnit: IOVideoUnit, didOutput sampleBuffer: CMSampleBuffer)
 }
 
-final class IOVideoUnit: NSObject, IOUnit {
+final public class IOVideoUnit: NSObject, IOUnit {
     typealias FormatDescription = CMVideoFormatDescription
 
     enum Error: Swift.Error {

@@ -4,7 +4,7 @@ import AVFoundation
 import SwiftPMSupport
 #endif
 
-protocol IOMixerDelegate: AnyObject {
+publicprotocol IOMixerDelegate: AnyObject {
     func mixer(_ mixer: IOMixer, didOutput audio: AVAudioPCMBuffer, when: AVAudioTime)
     func mixer(_ mixer: IOMixer, didOutput video: CMSampleBuffer)
     func mixer(_ mixer: IOMixer, videoErrorOccurred error: IOVideoUnitError)
@@ -84,7 +84,7 @@ final public class IOMixer {
     #endif
 }
 
-extension IOMixer: Running {
+public extension IOMixer: Running {
     // MARK: Running
     func startRunning(name: String? = nil) {
         guard !isRunning.value else {
