@@ -31,13 +31,12 @@ public final class SRTStream: IOStream {
                 return
             }
             if connection.connected {
-                let state = self.readyState
-                let isAlreadyPublishing = (state == .publish || state == .publishing(muxer: self.writer))
-                guard !isAlreadyPublishing else { return }
+                guard !self.isPublishing else { return }
                 self.action?()
                 self.action = nil
             } else {
                 self.readyState = .open
+                self.isPublishing = false
             }
         }
         keyValueObservations.append(keyValueObservation)
@@ -97,6 +96,7 @@ public final class SRTStream: IOStream {
             if self.readyState == .closed || self.readyState == .initialized {
                 return
             }
+            self.isPublishing = false
             self.readyState = .closed
         }
     }
