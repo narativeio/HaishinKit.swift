@@ -25,7 +25,7 @@ public final class SRTStream: IOStream {
         super.init()
         self.connection = connection
         self.connection?.streams.append(self)
-        /*
+        
         let keyValueObservation = connection.observe(\.connected, options: [.new, .old]) { [weak self] _, _ in
             guard let self = self else {
                 return
@@ -38,7 +38,7 @@ public final class SRTStream: IOStream {
             }
         }
         keyValueObservations.append(keyValueObservation)
-        */
+        
     }
 
     deinit {
