@@ -15,7 +15,7 @@ public enum IOVideoUnitError: Error {
     case failedToSetOption(status: OSStatus, option: VTSessionOption)
 }
 
-publicprotocol IOVideoUnitDelegate: AnyObject {
+public protocol IOVideoUnitDelegate: AnyObject {
     func videoUnit(_ videoUnit: IOVideoUnit, didOutput sampleBuffer: CMSampleBuffer)
 }
 
