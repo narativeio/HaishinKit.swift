@@ -86,7 +86,7 @@ final public class IOMixer {
 
 extension IOMixer: Running {
     // MARK: Running
-    func startRunning(name: String? = nil) {
+    public func startRunning(name: String? = nil) {
         guard !isRunning.value else {
             return
         }
@@ -96,7 +96,7 @@ extension IOMixer: Running {
         isRunning.mutate { $0 = true }
     }
 
-    func stopRunning() {
+    public func stopRunning() {
         guard isRunning.value && !isSecondary else {
             return
         }
@@ -207,7 +207,7 @@ extension IOMixer: IOAudioUnitDelegate {
 
 extension IOMixer: IOVideoUnitDelegate {
     // MARK: IOVideoUnitDelegate
-    func videoUnit(_ videoUnit: IOVideoUnit, didOutput sampleBuffer: CMSampleBuffer) {
+    public func videoUnit(_ videoUnit: IOVideoUnit, didOutput sampleBuffer: CMSampleBuffer) {
         delegate?.mixer(self, didOutput: sampleBuffer)
     }
 }
