@@ -30,6 +30,7 @@ public final class SRTStream: IOStream {
                 return
             }
             if connection.connected {
+                guard self.readyState.rawValue < IOStream.ReadyState.publish.rawValue else { return }
                 self.action?()
                 self.action = nil
             } else {
@@ -108,6 +109,7 @@ public final class SRTStream: IOStream {
             if audioInputFormat != nil {
                 writer.expectedMedias.insert(.audio)
             }
+            guard case .publish = self.readyState else { return }
             self.readyState = .publishing(muxer: writer)
         default:
             break
