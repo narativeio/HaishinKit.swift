@@ -30,7 +30,9 @@ public final class SRTStream: IOStream {
                 return
             }
             if connection.connected {
-                guard self.readyState.rawValue < IOStream.ReadyState.publish.rawValue else { return }
+                let state = self.readyState
+                let isAlreadyPublishing = (state == .publish || state == .publishing(muxer: self.writer))
+                guard !isAlreadyPublishing else { return }
                 self.action?()
                 self.action = nil
             } else {
