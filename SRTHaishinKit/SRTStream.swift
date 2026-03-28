@@ -9,7 +9,6 @@ public final class SRTStream: IOStream {
     private var action: (() -> Void)?
     private var keyValueObservations: [NSKeyValueObservation] = []
     private weak var connection: SRTConnection?
-    private var isPublishing = false 
     private lazy var writer = {
         var writer = TSWriter()
         writer.delegate = self
@@ -26,20 +25,20 @@ public final class SRTStream: IOStream {
         super.init()
         self.connection = connection
         self.connection?.streams.append(self)
+        /*
         let keyValueObservation = connection.observe(\.connected, options: [.new, .old]) { [weak self] _, _ in
             guard let self = self else {
                 return
             }
             if connection.connected {
-                guard !self.isPublishing else { return }
                 self.action?()
                 self.action = nil
             } else {
                 self.readyState = .open
-                self.isPublishing = false
             }
         }
         keyValueObservations.append(keyValueObservation)
+        */
     }
 
     deinit {
@@ -54,19 +53,17 @@ public final class SRTStream: IOStream {
                 switch self.readyState {
                 case .publish, .publishing:
                     self.readyState = .open
-                    self.isPublishing = false
                 default:
                     break
                 }
                 return
             }
-            guard !self.isPublishing else { return }
-            if self.connection?.connected == true {
-                self.isPublishing = true
-                self.readyState = .publish
-            } else {
-                self.action = { [weak self] in self?.publish(name) }
+            // Plus de stockage d'action — on publie directement si connecté
+            guard self.connection?.connected == true else {
+                print("publish() called but not connected yet")
+                return
             }
+            self.readyState = .publish
         }
     }
 
@@ -96,7 +93,6 @@ public final class SRTStream: IOStream {
             if self.readyState == .closed || self.readyState == .initialized {
                 return
             }
-            self.isPublishing = false
             self.readyState = .closed
         }
     }
@@ -104,18 +100,16 @@ public final class SRTStream: IOStream {
     override public func readyStateDidChange(to readyState: IOStream.ReadyState) {
         super.readyStateDidChange(to: readyState)
         switch readyState {
+        case .play:
+            connection?.socket?.doInput()
+            self.readyState = .playing
         case .publish:
-            print("publish callstack:", Thread.callStackSymbols[0...5].joined(separator: "\n"))
             writer.expectedMedias.removeAll()
             if videoInputFormat != nil {
                 writer.expectedMedias.insert(.video)
             }
             if audioInputFormat != nil {
                 writer.expectedMedias.insert(.audio)
-            }
-            guard self.readyState == .publish else {
-                print("guard failed, readyState is:", self.readyState)
-                return
             }
             self.readyState = .publishing(muxer: writer)
         default:
