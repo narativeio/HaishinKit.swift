@@ -9,6 +9,7 @@ public final class SRTStream: IOStream {
     private var action: (() -> Void)?
     private var keyValueObservations: [NSKeyValueObservation] = []
     private weak var connection: SRTConnection?
+    private var isPublishing = false 
     private lazy var writer = {
         var writer = TSWriter()
         writer.delegate = self
@@ -54,12 +55,15 @@ public final class SRTStream: IOStream {
                 switch self.readyState {
                 case .publish, .publishing:
                     self.readyState = .open
+                    self.isPublishing = false
                 default:
                     break
                 }
                 return
             }
+            guard !self.isPublishing else { return }
             if self.connection?.connected == true {
+                self.isPublishing = true
                 self.readyState = .publish
             } else {
                 self.action = { [weak self] in self?.publish(name) }
