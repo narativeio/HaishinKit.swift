@@ -4,7 +4,7 @@ import AVFoundation
 import SwiftPMSupport
 #endif
 
-public protocol IOMixerDelegate: AnyObject {
+protocol IOMixerDelegate: AnyObject {
     func mixer(_ mixer: IOMixer, didOutput audio: AVAudioPCMBuffer, when: AVAudioTime)
     func mixer(_ mixer: IOMixer, didOutput video: CMSampleBuffer)
     func mixer(_ mixer: IOMixer, videoErrorOccurred error: IOVideoUnitError)
@@ -18,16 +18,16 @@ public protocol IOMixerDelegate: AnyObject {
 }
 
 /// An object that mixies audio and video for streaming.
-final public class IOMixer {
+final class IOMixer {
     static let defaultFrameRate: Float64 = 30
 
-    public weak var muxer: (any IOMuxer)?
+    weak var muxer: (any IOMuxer)?
 
-    public weak var delegate: (any IOMixerDelegate)?
+    weak var delegate: (any IOMixerDelegate)?
 
-    public var isRunning: Atomic<Bool> = .init(false)
+    private(set) var isRunning: Atomic<Bool> = .init(false)
 
-    public lazy var recorder = IORecorder()
+    private(set) lazy var recorder = IORecorder()
 
     public lazy var audioIO = {
         var audioIO = IOAudioUnit()
@@ -47,7 +47,7 @@ final public class IOMixer {
         return session
     }()
 
-    public lazy var audioEngine: AVAudioEngine? = {
+    private(set) lazy var audioEngine: AVAudioEngine? = {
         return IOStream.audioEngineHolder.retain()
     }()
     
@@ -86,7 +86,7 @@ final public class IOMixer {
 
 extension IOMixer: Running {
     // MARK: Running
-    public func startRunning(name: String? = nil) {
+    func startRunning(name: String? = nil) {
         guard !isRunning.value else {
             return
         }
@@ -96,7 +96,7 @@ extension IOMixer: Running {
         isRunning.mutate { $0 = true }
     }
 
-    public func stopRunning() {
+    func stopRunning() {
         guard isRunning.value && !isSecondary else {
             return
         }
@@ -207,7 +207,7 @@ extension IOMixer: IOAudioUnitDelegate {
 
 extension IOMixer: IOVideoUnitDelegate {
     // MARK: IOVideoUnitDelegate
-    public func videoUnit(_ videoUnit: IOVideoUnit, didOutput sampleBuffer: CMSampleBuffer) {
+    func videoUnit(_ videoUnit: IOVideoUnit, didOutput sampleBuffer: CMSampleBuffer) {
         delegate?.mixer(self, didOutput: sampleBuffer)
     }
 }

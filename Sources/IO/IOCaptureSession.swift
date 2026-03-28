@@ -11,7 +11,7 @@ protocol IOCaptureSessionDelegate: AnyObject {
     #endif
 }
 
-final public class IOCaptureSession {
+final class IOCaptureSession {
     #if os(iOS) || os(tvOS)
     static var isMultiCamSupported: Bool {
         if #available(iOS 13.0, tvOS 17.0, *) {
