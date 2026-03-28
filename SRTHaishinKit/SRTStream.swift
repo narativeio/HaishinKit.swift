@@ -100,10 +100,8 @@ public final class SRTStream: IOStream {
     override public func readyStateDidChange(to readyState: IOStream.ReadyState) {
         super.readyStateDidChange(to: readyState)
         switch readyState {
-        case .play:
-            connection?.socket?.doInput()
-            self.readyState = .playing
         case .publish:
+            print("publish callstack:", Thread.callStackSymbols[0...5].joined(separator: "\n"))
             writer.expectedMedias.removeAll()
             if videoInputFormat != nil {
                 writer.expectedMedias.insert(.video)
@@ -111,7 +109,10 @@ public final class SRTStream: IOStream {
             if audioInputFormat != nil {
                 writer.expectedMedias.insert(.audio)
             }
-            guard case .publish = self.readyState else { return }
+            guard self.readyState == .publish else {
+                print("guard failed, readyState is:", self.readyState)
+                return
+            }
             self.readyState = .publishing(muxer: writer)
         default:
             break
