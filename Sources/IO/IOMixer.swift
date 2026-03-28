@@ -25,9 +25,9 @@ final class IOMixer {
 
     weak var delegate: (any IOMixerDelegate)?
 
-    private(set) var isRunning: Atomic<Bool> = .init(false)
+    public var isRunning: Atomic<Bool> = .init(false)
 
-    private(set) lazy var recorder = IORecorder()
+    public lazy var recorder = IORecorder()
 
     public lazy var audioIO = {
         var audioIO = IOAudioUnit()
@@ -47,7 +47,7 @@ final class IOMixer {
         return session
     }()
 
-    private(set) lazy var audioEngine: AVAudioEngine? = {
+    public lazy var audioEngine: AVAudioEngine? = {
         return IOStream.audioEngineHolder.retain()
     }()
     
